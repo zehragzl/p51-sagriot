@@ -1,0 +1,13 @@
+# ESP-IDF
+build/
+sdkconfig.old
+managed_components/
+# Python
+__pycache__/
+.venv/
+*.pyc
+# Veri ve veritabanı
+*.db
+data/raw/
+# macOS
+.DS_Store
