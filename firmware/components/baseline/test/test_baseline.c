@@ -4,18 +4,20 @@
  * Reads a CSV with columns vwc,air_temp,air_humidity (one row per 5-min
  * sample), pushes the rows through the model and, once 288 samples are
  * in, prints one line per sample:
- *   index,a,c,irrigate_now,warn,when_minutes   (persistence mode)
+ *   index,a,c,irrigate_now,warn,when_minutes
  *
- * Build:  make            Run:  ./test_baseline data.csv > c_out.csv
+ * Build:  make
+ * Run:    ./test_baseline data.csv [field_capacity] [persistence|seasonal]
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "baseline.h"
 
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        fprintf(stderr, "usage: %s data.csv [field_capacity]\n", argv[0]);
+        fprintf(stderr, "usage: %s data.csv [field_capacity] [persistence|seasonal]\n", argv[0]);
         return 1;
     }
     FILE *f = fopen(argv[1], "r");
@@ -26,6 +28,8 @@ int main(int argc, char **argv)
         .fc_warn_low = 70.0f,
         .vpd_warn_high = 0.8f,
     };
+    vpd_mode_t mode = (argc > 3 && strcmp(argv[3], "seasonal") == 0)
+                      ? VPD_SEASONAL : VPD_PERSISTENCE;
     static baseline_t b;           /* static: 2.3 KB, keep it off the stack */
     baseline_init(&b, params);
 
@@ -39,7 +43,7 @@ int main(int argc, char **argv)
         if (sscanf(line, "%f,%f,%f", &vwc, &t, &rh) != 3) { index++; continue; }
         baseline_push(&b, vwc, t, rh);
         if (baseline_fit(&b)) {
-            baseline_decision_t d = baseline_decide(&b, VPD_PERSISTENCE);
+            baseline_decision_t d = baseline_decide(&b, mode);
             printf("%ld,%.6g,%.6g,%d,%d,%d\n", index, b.a, b.c,
                    d.irrigate_now, d.warn, d.when_minutes);
         }

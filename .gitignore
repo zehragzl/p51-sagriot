@@ -12,3 +12,4 @@ data/raw/
 # macOS
 .DS_Store
 firmware/components/baseline/test/test_baseline
+.vscode/
