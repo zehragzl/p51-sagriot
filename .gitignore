@@ -13,3 +13,4 @@ data/raw/
 .DS_Store
 firmware/components/baseline/test/test_baseline
 .vscode/
+data/*.db

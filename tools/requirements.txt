@@ -1,2 +1,3 @@
 numpy
 pandas
+paho-mqtt>=2.0
