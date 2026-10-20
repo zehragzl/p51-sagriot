@@ -36,12 +36,6 @@ static float compute_vpd(float air_temp, float rh)
     return (float)round_to(es - ea, 1000.0);
 }
 
-/* advise.py: soil_fc = round(vwc / FC * 100, 1) */
-static float soil_fc(float vwc, float field_capacity)
-{
-    return (float)round_to((double)vwc / field_capacity * 100.0, 10.0);
-}
-
 /* i-th sample in time order: 0 = oldest, count-1 = newest. */
 static uint16_t chrono_index(const baseline_t *b, uint16_t i)
 {
@@ -72,8 +66,18 @@ void baseline_push(baseline_t *b, float vwc, float air_temp, float rh)
 
 /*
  * Spec section 4.1. Fits delta = a * vpd + c over the full 24 h window,
- * with a ridge penalty on a only. Sums are kept in double so the result
- * stays close to the float64 Python reference.
+ * with a ridge penalty on a only.
+ *
+ * The ESP32-S3 has a single-precision FPU; double is emulated in software
+ * and made this fit take ~0.7 ms on the chip. So the sums are in float,
+ * and centred on the means first, which keeps float accurate:
+ *
+ *   a = Sxy / (Sxx_c + p)        Sxx_c = sum (x - mean_x)^2
+ *   c = mean_d - a * mean_x      Sxy   = sum (x - mean_x)(d - mean_d)
+ *
+ * This is the same solution as the 2x2 system in the spec (eliminate c
+ * from its second row). The ridge penalty keeps the reference definition,
+ * p = ridge * trace(gram) / 2 with trace = Sxx_c + n*mean_x^2 + n.
  */
 bool baseline_fit(baseline_t *b)
 {
@@ -82,31 +86,39 @@ bool baseline_fit(baseline_t *b)
         return false;
     }
 
-    double sxx = 0.0, sx = 0.0, sxd = 0.0, sd = 0.0;
-    const double n = (double)(b->count - 1);
+    const int n = b->count - 1;
 
-    for (uint16_t i = 0; i + 1 < b->count; i++) {
-        double delta = (double)b->vwc[chrono_index(b, i + 1)]
-                     - (double)b->vwc[chrono_index(b, i)];
-        double x = (double)b->vpd[chrono_index(b, i + 1)];
-        sxx += x * x;
-        sx  += x;
-        sxd += x * delta;
-        sd  += delta;
+    /* pass 1: means */
+    float sum_x = 0.0f, sum_d = 0.0f;
+    for (int i = 0; i < n; i++) {
+        sum_x += b->vpd[chrono_index(b, (uint16_t)(i + 1))];
+        sum_d += b->vwc[chrono_index(b, (uint16_t)(i + 1))]
+               - b->vwc[chrono_index(b, (uint16_t)i)];
+    }
+    const float mean_x = sum_x / (float)n;
+    const float mean_d = sum_d / (float)n;
+
+    /* pass 2: centred sums */
+    float sxx_c = 0.0f, sxy = 0.0f;
+    for (int i = 0; i < n; i++) {
+        float dx = b->vpd[chrono_index(b, (uint16_t)(i + 1))] - mean_x;
+        float dd = (b->vwc[chrono_index(b, (uint16_t)(i + 1))]
+                  - b->vwc[chrono_index(b, (uint16_t)i)]) - mean_d;
+        sxx_c += dx * dx;
+        sxy   += dx * dd;
     }
 
-    /* penalty = ridge * trace(gram) / columns, not applied to the intercept */
-    double p = RIDGE * (sxx + n) / 2.0;
-    double a11 = sxx + p;
-    double det = a11 * n - sx * sx;
+    const float trace = sxx_c + (float)n * mean_x * mean_x + (float)n;
+    const float p = (float)RIDGE * trace / 2.0f;
+    const float denom = sxx_c + p;
 
-    if (fabs(det) < DET_EPSILON) {
+    if (!(denom > (float)DET_EPSILON)) {
         b->fitted = false;   /* Python falls back to lstsq here; we report no fit */
         return false;
     }
 
-    b->a = (float)((sxd * n - sx * sd) / det);
-    b->c = (float)((a11 * sd - sx * sxd) / det);
+    b->a = sxy / denom;
+    b->c = mean_d - b->a * mean_x;
     b->fitted = true;
     return true;
 }
@@ -124,7 +136,7 @@ static float future_vpd(const baseline_t *b, vpd_mode_t mode, int k)
 
 /*
  * Spec section 4.2. Writes the 36-step VWC forecast into out_vwc.
- * Returns 0 on success, -1 if the model is not fitted.
+ * Returns 0 on success, -1 if the model is not fitted. Float throughout.
  */
 int baseline_forecast(const baseline_t *b, vpd_mode_t mode,
                       float out_vwc[BASELINE_HORIZON])
@@ -133,15 +145,15 @@ int baseline_forecast(const baseline_t *b, vpd_mode_t mode,
         return -1;
     }
 
-    double level = (double)b->vwc[chrono_index(b, (uint16_t)(b->count - 1))];
+    float level = b->vwc[chrono_index(b, (uint16_t)(b->count - 1))];
 
     for (int k = 1; k <= BASELINE_HORIZON; k++) {
-        double rate = (double)b->a * future_vpd(b, mode, k) + (double)b->c;
-        if (rate > 0.0) {
-            rate = 0.0;      /* non_increasing: no water gain without input */
+        float rate = b->a * future_vpd(b, mode, k) + b->c;
+        if (rate > 0.0f) {
+            rate = 0.0f;     /* non_increasing: no water gain without input */
         }
         level += rate;
-        out_vwc[k - 1] = (float)level;
+        out_vwc[k - 1] = level;
     }
     return 0;
 }
@@ -151,6 +163,11 @@ int baseline_forecast(const baseline_t *b, vpd_mode_t mode,
  * strictly below the warning line. Rule 1 (Water stress) needs the same
  * soil condition plus high VPD, so it can never fire earlier than Rule 2;
  * the first firing time is therefore the first Rule 2 step.
+ *
+ * round(vwc / FC * 100, 1) < warn_low  <=>  vwc / FC * 100 < warn_low - 0.05
+ * (a value exactly on x.x5 rounds half to even and lands on warn_low, which
+ * is not below it). So the line is turned into a VWC threshold once, and
+ * each step is a single float comparison instead of a divide and a round.
  */
 baseline_decision_t baseline_decide(const baseline_t *b, vpd_mode_t mode)
 {
@@ -161,11 +178,11 @@ baseline_decision_t baseline_decide(const baseline_t *b, vpd_mode_t mode)
         return d;
     }
 
-    const float fc = b->params.field_capacity;
-    const float warn_low = b->params.fc_warn_low;
+    const float vwc_line = (b->params.fc_warn_low - 0.05f) / 100.0f
+                           * b->params.field_capacity;
 
     float vwc_now = b->vwc[chrono_index(b, (uint16_t)(b->count - 1))];
-    d.irrigate_now = soil_fc(vwc_now, fc) < warn_low;
+    d.irrigate_now = vwc_now < vwc_line;
 
     float forecast[BASELINE_HORIZON];
     if (baseline_forecast(b, mode, forecast) != 0) {
@@ -173,7 +190,7 @@ baseline_decision_t baseline_decide(const baseline_t *b, vpd_mode_t mode)
     }
 
     for (int k = 1; k <= BASELINE_HORIZON; k++) {
-        if (soil_fc(forecast[k - 1], fc) < warn_low) {
+        if (forecast[k - 1] < vwc_line) {
             d.warn = true;
             d.when_minutes = (int16_t)(k * STEP_MINUTES);
             break;
