@@ -30,7 +30,7 @@ One message per model (`baseline`, `tinyml`).
 
 ```json
 {"v":1, "node":"node01", "seq":1042, "ts":"2026-11-03T10:15:00Z",
- "model":"baseline", "warn":true, "t_cross_min":48, "vwc_pred_3h":24.9,
+ "model":"baseline", "now":false, "warn":true, "t_cross_min":48, "vwc_pred_3h":24.9,
  "infer_us":90, "t_send_ms":1730}
 ```
 
@@ -39,7 +39,12 @@ One message per model (`baseline`, `tinyml`).
 - `seq`: increases by 1 every cycle; the Pi uses gaps to count lost cycles.
 - `ts`: node clock (UTC), synced by NTP when Wi-Fi is up.
 - `t_send_ms`: node millisecond counter at publish time, used for latency.
-- `warn`: true when the predicted dry-threshold crossing is less than 1 h away.
+- `now`: true when the current sample is already below the irrigation line
+  (Rule 2 fires now).
+- `warn`: true when a rule fires anywhere in the 3 h forecast horizon
+  (docs/baseline_port_spec.md, section 7).
+- `ts` is `null` until the node clock has been set by SNTP.
+- Missing values are sent as `null`.
 - `t_cross_min`: minutes until the predicted crossing (-1 if none within 3 h).
 
 ## Units

@@ -4,7 +4,7 @@
  * Replays the 21-day internship log (6,020 five-minute samples) through
  * firmware/components/baseline and, for every 24 h window:
  *   - compares irrigate_now and when_minutes with the Python reference
- *     (expected values embedded in baseline_data.c),
+ *     (expected values embedded in firmware/components/replay),
  *   - times baseline_fit() and baseline_decide() with esp_timer.
  * Memory: static model state (sizeof(baseline_t)) and the peak stack used
  * by fit + decide, from the high-water mark of a dedicated task.
@@ -19,7 +19,7 @@
 #include "freertos/task.h"
 
 #include "baseline.h"
-#include "baseline_data.h"
+#include "replay_data.h"
 
 #define BENCH_STACK_BYTES 4096
 

@@ -16,3 +16,5 @@ firmware/components/baseline/test/test_baseline
 data/*.db
 sdkconfig
 sdkconfig.old
+# Personal firmware settings (Wi-Fi password)
+firmware/sdkconfig.local

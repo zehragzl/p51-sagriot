@@ -5,8 +5,8 @@ seq gaps between them, so the share of cycles that reached the gateway
 can be read directly.
 
 Usage
-  python tools/gateway_stats.py               # data/gateway.db
-  python tools/gateway_stats.py --db other.db
+  python gateway/gateway_stats.py               # data/gateway.db
+  python gateway/gateway_stats.py --db other.db
 """
 import argparse
 import sqlite3

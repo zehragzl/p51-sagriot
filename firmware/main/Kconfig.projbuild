@@ -1,0 +1,40 @@
+menu "SAgrIoT node"
+
+    config SAGRIOT_WIFI_SSID
+        string "Wi-Fi SSID (2.4 GHz)"
+        default "my-wifi"
+
+    config SAGRIOT_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default ""
+
+    config SAGRIOT_MQTT_URI
+        string "MQTT broker URI"
+        default "mqtt://192.168.1.10:1883"
+        help
+            The gateway's broker. During development: the Mac's IP on the
+            same network (ipconfig getifaddr en0).
+
+    config SAGRIOT_NODE_ID
+        string "Node id (used in the topics)"
+        default "node01"
+
+    choice SAGRIOT_MODE
+        prompt "Decision mode"
+        default SAGRIOT_MODE_EDGE
+
+        config SAGRIOT_MODE_EDGE
+            bool "edge: decide on the node, send the decision"
+        config SAGRIOT_MODE_CLOUD
+            bool "cloud: send the reading, decide in the cloud"
+    endchoice
+
+    config SAGRIOT_PERIOD_MS
+        int "Cycle period (ms)"
+        default 2000
+        range 200 3600000
+        help
+            A real node uses 300000 (5 min). Replay tests use a short
+            period so hours of data go through in minutes.
+
+endmenu

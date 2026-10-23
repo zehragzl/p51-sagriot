@@ -4,7 +4,7 @@ Replays the 21-day internship log (sagriot-dss `data/snapshot_0909.csv`,
 6,020 five-minute samples) through `firmware/components/baseline` on the
 board and compares every decision with the Python reference
 (`DrivenDrying(("vpd",))`, persistence future VPD, FC 64.9), which is
-embedded in `main/baseline_data.c`.
+embedded in `firmware/components/replay/replay_data.c`.
 
 ## Result (20 Oct 2026, ESP32-S3-DevKitC-1 N16R8 clone, 240 MHz, ESP-IDF v5.3.2)
 
