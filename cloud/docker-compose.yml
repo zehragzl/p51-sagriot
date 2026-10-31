@@ -1,0 +1,26 @@
+# Cloud side: MQTT broker + cloud service, everything the VM runs.
+# On a new VM: copy this folder, create mosquitto/passwd and .env (see
+# cloud/README.md), then `docker compose up -d`.
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/passwd:/mosquitto/config/passwd:ro
+      - mosquitto-data:/mosquitto/data
+
+  cloud:
+    image: python:3.12-slim
+    restart: unless-stopped
+    depends_on: [mosquitto]
+    working_dir: /app
+    volumes:
+      - ./:/app:ro
+    env_file: .env
+    command: ["sh", "-c", "pip install --quiet 'paho-mqtt>=2.0' && python -u fake_cloud.py --host mosquitto --user \"$$MQTT_USER\" --password \"$$MQTT_PASSWORD\""]
+
+volumes:
+  mosquitto-data:

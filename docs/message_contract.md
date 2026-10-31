@@ -1,4 +1,4 @@
-# Message Contract (v0.1, draft)
+# Message Contract (v0.2, draft)
 
 All node, gateway and cloud code follows this contract.
 Every payload carries a version field `v`. Change the version when a field changes.
@@ -9,12 +9,20 @@ Every payload carries a version field `v`. Change the version when a field chang
 
 | Topic | Direction | Sent when | QoS |
 |---|---|---|---|
-| `sagriot/<node>/reading` | node → Pi | every cycle in cloud mode; buffered batch on reconnect | 1 |
-| `sagriot/<node>/decision` | node → Pi | every cycle in edge mode | 1 |
-| `sagriot/<node>/heartbeat` | node → Pi | edge mode, when nothing else is sent | 0 |
-| `sagriot/<node>/status` | node → Pi | on boot and on errors (retained) | 1 |
-| `sagriot/<node>/cloud_decision` | cloud → Pi | after the cloud models run on a reading | 1 |
-| `sagriot/<node>/config` | Pi → node | when the mode or interval changes (retained) | 1 |
+| `sagriot/<node>/reading` | node → gateway → cloud | every cycle; buffered batch on reconnect | 1 |
+| `sagriot/<node>/decision` | node → gateway | every cycle (stays on the gateway) | 1 |
+| `sagriot/<node>/status` | node → gateway → cloud | on boot and on errors (retained) | 1 |
+| `sagriot/<node>/cloud_decision` | cloud → gateway | after the cloud models run on a reading | 1 |
+| `sagriot/<node>/config` | gateway → node | when the interval changes (retained) | 1 |
+
+### Flow
+
+Every cycle the node sends both its reading and its own decision, then may
+sleep; it does not wait for the cloud. The gateway (Mac now, Pi later)
+keeps the edge decision and forwards the reading to the cloud through a
+Mosquitto bridge (`gateway/bridge.conf.example`). The cloud answers with
+`cloud_decision` for the same `seq`; the gateway pairs the two
+(`gateway/compare.py`) and measures the round trip on its own clock.
 
 ## Reading payload
 
@@ -38,7 +46,7 @@ One message per model (`baseline`, `tinyml`).
 
 - `seq`: increases by 1 every cycle; the Pi uses gaps to count lost cycles.
 - `ts`: node clock (UTC), synced by NTP when Wi-Fi is up.
-- `t_send_ms`: node millisecond counter at publish time, used for latency.
+- `t_send_ms`: node millisecond counter at publish time (node-side timing).
 - `now`: true when the current sample is already below the irrigation line
   (Rule 2 fires now).
 - `warn`: true when a rule fires anywhere in the 3 h forecast horizon
@@ -62,3 +70,7 @@ One message per model (`baseline`, `tinyml`).
 
 - Final probe fields depend on Rüya's driver.
 - Cycle interval (5, 10 or 15 min) not decided yet.
+- Decision content (which fields, which models) to be agreed by the team.
+- `seq` restarts at 0 on reboot; add a per-boot id (or keep seq in RTC memory
+  across deep sleep) so cycles stay unique. Until then the gateway pairs by
+  seq + arrival time.

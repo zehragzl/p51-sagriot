@@ -18,3 +18,9 @@ sdkconfig
 sdkconfig.old
 # Personal firmware settings (Wi-Fi password)
 firmware/sdkconfig.local
+
+# Cloud secrets
+cloud/.env
+cloud/mosquitto/passwd
+gateway/bridge.conf
+firmware/sdkconfig.local.bak

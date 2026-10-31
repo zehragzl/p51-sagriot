@@ -8,6 +8,7 @@ clock. The decision fields are placeholders (model "echo"), not a forecast.
 Usage
   python cloud/fake_cloud.py                  # broker on localhost:1883
   python cloud/fake_cloud.py --host 192.168.1.10 --delay 0.2
+  python cloud/fake_cloud.py --host mosquitto --user sagriot --password ...
 """
 import argparse
 import json
@@ -20,6 +21,8 @@ def main():
     parser = argparse.ArgumentParser(description="SAgrIoT fake cloud (echo)")
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--port", type=int, default=1883)
+    parser.add_argument("--user", default=None)
+    parser.add_argument("--password", default=None)
     parser.add_argument("--delay", type=float, default=0.0,
                         help="extra seconds before answering, to imitate model time")
     args = parser.parse_args()
@@ -47,6 +50,8 @@ def main():
         print(f"{node} seq {reading.get('seq')}: answered")
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="sagriot-fake-cloud")
+    if args.user:
+        client.username_pw_set(args.user, args.password)
     client.on_connect = on_connect
     client.on_message = on_message
     client.connect(args.host, args.port)

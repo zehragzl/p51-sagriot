@@ -1,0 +1,18 @@
+# Gateway broker -> cloud broker bridge (Mosquitto on the Mac now, the Pi later).
+# Copy, fill in the password, and include it from the gateway's mosquitto.conf:
+#   include_dir /opt/homebrew/etc/mosquitto/conf.d     (Mac, Homebrew)
+#   include_dir /etc/mosquitto/conf.d                  (Pi)
+connection sagriot-cloud
+address CLOUD_IP:1883
+remote_username sagriot
+remote_password change-me
+remote_clientid sagriot-gateway-bridge
+cleansession false
+restart_timeout 5 30
+
+# readings go up to the cloud, the cloud's decisions come back.
+# The node's own decision stays on the gateway (compared there).
+topic sagriot/+/reading out 1
+topic sagriot/+/status out 1
+topic sagriot/+/cloud_decision in 1
+topic sagriot/+/config in 1

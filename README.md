@@ -14,7 +14,7 @@ ESP32-S3 node  --MQTT-->  Raspberry Pi gateway  -->  cloud
 
 | Folder | What | Who |
 |---|---|---|
-| `docs/` | Message contract (MQTT topics and payloads), baseline port spec | all |
+| `docs/` | Integration plan (who delivers what, interfaces, timeline), message contract (MQTT topics and payloads), baseline port spec | all |
 | `firmware/` | The node: one ESP-IDF project | |
 | `firmware/main/` | The cycle: read, decide, send | Zehra |
 | `firmware/components/baseline/` | Physics model ("driven drying") in C, with a PC test in `test/` | Zehra |

@@ -19,15 +19,6 @@ menu "SAgrIoT node"
         string "Node id (used in the topics)"
         default "node01"
 
-    choice SAGRIOT_MODE
-        prompt "Decision mode"
-        default SAGRIOT_MODE_EDGE
-
-        config SAGRIOT_MODE_EDGE
-            bool "edge: decide on the node, send the decision"
-        config SAGRIOT_MODE_CLOUD
-            bool "cloud: send the reading, decide in the cloud"
-    endchoice
 
     config SAGRIOT_PERIOD_MS
         int "Cycle period (ms)"
