@@ -20,7 +20,7 @@ ESP32-S3 node  --MQTT-->  Raspberry Pi gateway  -->  cloud
 | `firmware/components/baseline/` | Physics model ("driven drying") in C, with a PC test in `test/` | Zehra |
 | `firmware/components/net/` | Wi-Fi, MQTT, clock | Zehra |
 | `firmware/components/replay/` | Recorded 21-day log, used instead of sensors for now | Zehra |
-| `firmware/components/sensors/` | Sensor drivers | Rüya |
+| `firmware/components/sensors/` | Sensor drivers: SHT31 + RS485 soil probe, probe power | Rüya |
 | `firmware/components/tinyml/` | Learned model on the node | Derya |
 | `gateway/` | Runs on the Pi: `logger.py` (MQTT → SQLite), `gateway_stats.py` (delivery report) | Zehra |
 | `cloud/` | Cloud service. For now `fake_cloud.py`, which only echoes | Zehra |
@@ -37,6 +37,8 @@ Python side (once): `python3 -m venv .venv && source .venv/bin/activate && pip i
 3. `python cloud/fake_cloud.py`
 4. Node: copy `firmware/sdkconfig.local.example` to `firmware/sdkconfig.local`, fill in Wi-Fi (2.4 GHz) and the Mac's IP, then in `firmware/`:
    `idf.py set-target esp32s3` and `idf.py -p <port> flash monitor`
+   Real sensors + deep sleep (5 min): set `CONFIG_SAGRIOT_SOURCE_SENSORS=y`, `CONFIG_SAGRIOT_DEEP_SLEEP=y`,
+   `CONFIG_SAGRIOT_PERIOD_MS=300000` (see the example file). Campus Wi-Fi: `CONFIG_SAGRIOT_WIFI_EAP_IDENTITY`
 5. `python gateway/gateway_stats.py`
 
 ## Working together
