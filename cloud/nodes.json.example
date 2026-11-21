@@ -1,0 +1,4 @@
+{
+  "default": {"field_capacity": 64.9, "step_minutes": 5},
+  "node01": {"field_capacity": 64.9, "step_minutes": 5}
+}

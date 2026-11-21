@@ -16,3 +16,6 @@ topic sagriot/+/reading out 1
 topic sagriot/+/status out 1
 topic sagriot/+/cloud_decision in 1
 topic sagriot/+/config in 1
+# digital twin state (retained) for the local web panel; acks go up
+topic sagriot/+/twin in 1
+topic sagriot/+/twin_ack out 1

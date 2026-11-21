@@ -19,8 +19,11 @@ services:
     working_dir: /app
     volumes:
       - ./:/app:ro
+      - cloud-state:/state            # twin + 24 h buffers survive restarts
     env_file: .env
-    command: ["sh", "-c", "pip install --quiet 'paho-mqtt>=2.0' && python -u fake_cloud.py --host mosquitto --user \"$$MQTT_USER\" --password \"$$MQTT_PASSWORD\""]
+    # service.py: baseline + digital twin (fake_cloud.py was the echo stand-in)
+    command: ["sh", "-c", "pip install --quiet 'paho-mqtt>=2.0' numpy && python -u service.py --host mosquitto --state /state $${NODES_FILE:+--nodes $$NODES_FILE}"]
 
 volumes:
   mosquitto-data:
+  cloud-state:
