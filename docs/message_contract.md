@@ -39,6 +39,11 @@ connects later sees the latest state at once.
  "what_if":{"horizon_h":120,
             "no_water":{"warn_in_min":0, "crit_in_min":1685, "vwc_end":34.6},
             "water_now":{"vwc_after":64.9, "warn_in_min":5190}},
+ "selected_model":"baseline",
+ "models":{"baseline":{"now":true, "warn":true, "t_cross_min":5, "vwc_pred_3h":42.0,
+                       "mae_3h":0.08, "scored":288},
+           "chronos":{"now":true, "warn":true, "t_cross_min":10, "vwc_pred_3h":42.6,
+                      "mae_3h":0.11, "scored":288}},
  "last_irrigation_ts":"2026-11-01T09:20:00Z",
  "model":{"fitted":true, "samples":288, "needed":288, "a":-0.012, "c":-0.004},
  "params":{"field_capacity":64.9, "step_minutes":5}}
@@ -49,6 +54,12 @@ connects later sees the latest state at once.
 - `what_if` is `null` until the model has 24 h of readings. A `null`
   minute value means "not within `horizon_h`"; `0` means "already below".
 - `water_now` assumes watering brings the soil back to field capacity.
+- `models`: one entry per model the cloud runs (`--model`), each with its
+  decision and its recent 3 h error; `selected_model` is the one the state
+  comes from (`cloud/models.py`, ModelSelector). `decision` is that model's.
+  The what-ifs always come from the baseline.
+- `cloud_decision` is sent once per model per reading; `model` tells them
+  apart (`gateway/compare.py --model chronos`).
 - A sudden-drop fault stays until the pot is watered or a `twin_ack`
   arrives (any payload).
 

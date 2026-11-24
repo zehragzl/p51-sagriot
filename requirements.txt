@@ -2,3 +2,6 @@ numpy
 pandas
 paho-mqtt>=2.0
 pytest
+# optional, for `service.py --model chronos` (~1 GB):
+# torch
+# chronos-forecasting

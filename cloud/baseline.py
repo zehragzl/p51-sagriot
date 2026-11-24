@@ -58,6 +58,25 @@ class Decision:
     fitted: bool = False
 
 
+def decision_from_forecast(vwc_now, forecast, params):
+    """Rule 2 on a 3 h forecast, for any model (strict line, as baseline.c).
+
+    forecast None (no model yet): only "now" is decided.
+    """
+    d = Decision()
+    line = params.vwc_line(params.fc_warn_low)
+    d.now = vwc_now < line
+    if forecast is None:
+        return d
+    d.fitted = True
+    d.vwc_pred_3h = round(float(forecast[-1]), 2)
+    below = np.nonzero(np.asarray(forecast) < line)[0]
+    if below.size:
+        d.warn = True
+        d.t_cross_min = int(round((below[0] + 1) * params.step_minutes))
+    return d
+
+
 @dataclass
 class Baseline:
     params: Params = field(default_factory=Params)
@@ -66,6 +85,7 @@ class Baseline:
     a: float = 0.0
     c: float = 0.0
     fitted: bool = False
+    last_forecast: np.ndarray | None = None
 
     # -- data -------------------------------------------------------------
     def push(self, vwc, air_t, rh):
@@ -124,21 +144,13 @@ class Baseline:
 
     # -- decision (spec 6-7) ----------------------------------------------
     def decide(self):
-        d = Decision()
         if self.count == 0:
-            return d
-        line = self.params.vwc_line(self.params.fc_warn_low)
-        d.now = self.vwc[-1] < line
+            return Decision()
         self.fit()
-        d.fitted = self.fitted
         fc = self.forecast()
-        if fc is None:
-            return d                              # no fit yet: only "now"
-        d.vwc_pred_3h = round(float(fc[-1]), 2)
-        below = np.nonzero(fc < line)[0]
-        if below.size:
-            d.warn = True
-            d.t_cross_min = int(round((below[0] + 1) * self.params.step_minutes))
+        self.last_forecast = fc
+        d = decision_from_forecast(self.vwc[-1], fc, self.params)
+        d.fitted = self.fitted
         return d
 
     # -- persistence across restarts ---------------------------------------

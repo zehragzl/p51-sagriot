@@ -73,6 +73,11 @@ def state_text(s):
         lines.append(f"Hava: {s['air_t']:.1f} °C, %{s['rh']:.0f} nem")
     for reason in s.get("reasons") or []:
         lines.append(f"• {reason}")
+    models = s.get("models") or {}
+    if len(models) > 1:
+        chosen = s.get("selected_model", "baseline")
+        mae = models.get(chosen, {}).get("mae_3h")
+        lines.append(f"Karar modeli: {chosen}" + (f" (3 sa hatası {mae:.2f} VWC)" if mae is not None else ""))
     wi = s.get("what_if")
     if wi:
         lines.append(f"🔮 Sulamazsam: %70 eşiğine {_minutes_text(wi['no_water']['warn_in_min'])}")

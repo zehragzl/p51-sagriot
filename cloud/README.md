@@ -15,6 +15,7 @@ VM is: install Docker, copy the folder, create the two secret files,
 | `baseline.py` | driven-drying model, same decision as the node (float64) |
 | `twin.py` | digital twin: state (😊 / 😟 / ⚠️), fault checks, what-ifs |
 | `replay_check.py` | runs the twin offline over a recorded log (no broker) |
+| `models.py` | extra models (Chronos, Derya's model) and the twin's model choice |
 | `telegram_bot.py` | Telegram alerts with buttons; saves the farmer's feedback |
 | `nodes.json.example` | per-node field capacity and cycle length |
 | `tests/` | `python -m pytest tests -q` (from this folder) |
@@ -82,3 +83,24 @@ export TELEGRAM_TOKEN=...            # or put it in cloud/.env (git-ignored)
 python cloud/telegram_bot.py         # next to service.py, same broker
 # then send /start to the bot from your phone
 ```
+
+## More models and the twin's choice (`models.py`)
+
+```bash
+pip install torch chronos-forecasting               # once, ~1 GB; first run downloads the model
+python cloud/service.py --model chronos             # baseline + Chronos-Bolt tiny
+python cloud/service.py --model chronos --model tinyml=derya_model:predict
+python cloud/replay_check.py ../../sagriot-dss/data/snapshot_0909.csv --model chronos
+```
+
+Each model sends its own `cloud_decision`. The twin scores every forecast
+once its 3 h have passed (only near the warning line, never across a
+watering) and listens to the model with the lowest recent error; the
+what-ifs stay with the baseline. On the internship record the baseline's
+3 h error in that zone is 0.082 VWC points against 0.298 for "no change".
+
+Chronos-Bolt tiny used 728 MB on the Raspberry Pi 5 (internship): it does
+not fit next to the rest on a 1 GB VM; use a 2 GB machine.
+
+A model for `--model name=module:function` is any
+`predict(vwc_24h, vpd_24h) -> 36 VWC values` (288 inputs each, 5-min steps).

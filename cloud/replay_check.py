@@ -9,6 +9,7 @@ Usage
   python cloud/replay_check.py ../sagriot-dss/data/snapshot_0909.csv
   python cloud/replay_check.py LOG.csv --fc 23.5 --csv data/twin_timeline.csv
   python cloud/replay_check.py LOG.csv --inject-drop    # adds the 9 Sept probe shift
+  python cloud/replay_check.py LOG.csv --model chronos --model persistence
 
 The log needs the internship columns: timestamp, soil_vwc, air_temp,
 air_humidity (soil_temp optional). It is resampled to 5 min like the
@@ -20,6 +21,7 @@ import csv
 import pandas as pd
 
 from baseline import Params
+from models import load_model
 from twin import Twin
 
 
@@ -46,9 +48,9 @@ def inject_probe_shift(frame, drop_to=43.0, steps=3, hold_steps=24):
     return pd.concat([frame, pd.DataFrame(rows, index=index)]), index[0]
 
 
-def run(frame, params, node="replay"):
+def run(frame, params, node="replay", models=()):
     """Feeds the frame to a fresh twin; returns one state dict per sample."""
-    twin = Twin(params)
+    twin = Twin(params, extra_models=list(models))
     out = []
     for seq, (ts, row) in enumerate(frame.iterrows()):
         reading = {"node": node, "seq": seq, "ts": ts.isoformat(),
@@ -81,19 +83,32 @@ def main():
     parser.add_argument("--inject-drop", action="store_true",
                         help="append the 9 Sept probe displacement after the record")
     parser.add_argument("--csv", default=None, help="write the full timeline here")
+    parser.add_argument("--model", action="append", default=[],
+                        help="extra model (chronos, persistence, name=module:function)")
     args = parser.parse_args()
 
     frame = load_log(args.log)
     if args.inject_drop:
         frame, at = inject_probe_shift(frame)
         print(f"injected probe shift from {at}")
-    states = run(frame, Params(field_capacity=args.fc))
+    states = run(frame, Params(field_capacity=args.fc),
+                 models=[load_model(m) for m in args.model])
 
     counts = {k: sum(s["state"] == k for s in states) for k in ("happy", "thirsty", "fault")}
     print(f"{len(states)} samples | " + " | ".join(f"{k}: {v}" for k, v in counts.items()))
     for ts, a, b, reasons, fc in transitions(states):
         why = f"  ({'; '.join(reasons)})" if reasons else ""
         print(f"{ts}  {a or '-':7s} -> {b:7s}  soil_fc={fc}{why}")
+
+    last = states[-1]
+    if len(last["models"]) > 1:
+        print("model choice at the end: " + last["selected_model"])
+        for name, m in last["models"].items():
+            print(f"  {name:12s} 3 h MAE {m.get('mae_3h')} VWC points over {m.get('scored')} forecasts")
+        picks = {}
+        for s in states:
+            picks[s["selected_model"]] = picks.get(s["selected_model"], 0) + 1
+        print("  samples per chosen model: " + ", ".join(f"{k} {v}" for k, v in picks.items()))
 
     if args.csv:
         with open(args.csv, "w", newline="") as f:

@@ -23,6 +23,8 @@ Usage
   python cloud/service.py                                  # broker on localhost
   python cloud/service.py --host mosquitto --user sagriot --password ...
   python cloud/service.py --nodes cloud/nodes.json --state data/cloud_state
+  python cloud/service.py --model chronos            # + Chronos-Bolt (needs torch)
+  python cloud/service.py --model tinyml=derya_model:predict
 
 nodes.json (optional), per node:
   {"node01": {"field_capacity": 64.9, "step_minutes": 5}}
@@ -32,10 +34,10 @@ import json
 import os
 import resource
 import sys
-import time
 from pathlib import Path
 
 from baseline import Params
+from models import load_model
 from twin import Twin
 
 DEFAULTS = {"field_capacity": 64.9, "step_minutes": 5.0}
@@ -44,8 +46,9 @@ DEFAULTS = {"field_capacity": 64.9, "step_minutes": 5.0}
 class Service:
     """MQTT-free core: handle() takes one message and returns what to publish."""
 
-    def __init__(self, node_config=None, state_dir=None):
+    def __init__(self, node_config=None, state_dir=None, models=()):
         self.node_config = node_config or {}
+        self.models = list(models)            # extra models, shared by all nodes
         self.state_dir = Path(state_dir) if state_dir else None
         self.twins = {}
 
@@ -54,7 +57,8 @@ class Service:
             cfg = {**DEFAULTS, **self.node_config.get("default", {}),
                    **self.node_config.get(node, {})}
             twin = Twin(Params(field_capacity=float(cfg["field_capacity"]),
-                               step_minutes=float(cfg["step_minutes"])))
+                               step_minutes=float(cfg["step_minutes"])),
+                        extra_models=self.models)
             path = self._state_path(node)
             if path and path.exists():
                 try:
@@ -98,20 +102,21 @@ class Service:
         reading.setdefault("node", node)
 
         twin = self.twin(node)
-        t0 = time.perf_counter()
         decision, state = twin.process(reading)
-        infer_us = int((time.perf_counter() - t0) * 1e6)
         self._save(node)
 
-        cloud_decision = {
-            "v": 1, "node": node, "seq": reading.get("seq"), "ts": reading.get("ts"),
-            "model": "baseline", "now": decision.now, "warn": decision.warn,
-            "t_cross_min": decision.t_cross_min, "vwc_pred_3h": decision.vwc_pred_3h,
-            "infer_us": infer_us,
-            "t_send_ms": reading.get("t_send_ms"),   # echoed: node-side round trip
-        }
-        return [(f"sagriot/{node}/cloud_decision", json.dumps(cloud_decision), False),
-                (f"sagriot/{node}/twin", json.dumps(state, ensure_ascii=False), True)]
+        out = []
+        for model, d in twin.last_decisions.items():
+            cloud_decision = {
+                "v": 1, "node": node, "seq": reading.get("seq"), "ts": reading.get("ts"),
+                "model": model, "now": d.now, "warn": d.warn,
+                "t_cross_min": d.t_cross_min, "vwc_pred_3h": d.vwc_pred_3h,
+                "infer_us": twin.last_infer_us.get(model),
+                "t_send_ms": reading.get("t_send_ms"),   # echoed: node-side round trip
+            }
+            out.append((f"sagriot/{node}/cloud_decision", json.dumps(cloud_decision), False))
+        out.append((f"sagriot/{node}/twin", json.dumps(state, ensure_ascii=False), True))
+        return out
 
 
 def max_rss_mb():
@@ -129,10 +134,16 @@ def main():
     parser.add_argument("--password", default=os.environ.get("MQTT_PASSWORD"))
     parser.add_argument("--nodes", default=None, help="JSON file with per-node settings")
     parser.add_argument("--state", default="data/cloud_state", help="state directory")
+    parser.add_argument("--model", action="append", default=[],
+                        help="extra model next to the baseline: 'chronos', "
+                             "'chronos=amazon/chronos-bolt-small' or 'tinyml=module:function'")
     args = parser.parse_args()
 
     node_config = json.loads(Path(args.nodes).read_text()) if args.nodes else {}
-    service = Service(node_config, args.state)
+    models = [load_model(spec) for spec in args.model]
+    service = Service(node_config, args.state, models)
+    if models:
+        print("models: baseline + " + ", ".join(m.name for m in models))
     handled = 0
 
     def on_connect(client, userdata, flags, reason_code, properties):
@@ -150,7 +161,8 @@ def main():
             handled += 1
             s = twin_msgs[0]
             print(f"{s['node']} seq {s['seq']}: {s['emoji']} {s['label']} | "
-                  f"samples {s['model']['samples']}/288 | max RSS {max_rss_mb():.0f} MB"
+                  f"samples {s['model']['samples']}/288 | model {s['selected_model']} | "
+                  f"max RSS {max_rss_mb():.0f} MB"
                   + (f" | {'; '.join(s['reasons'])}" if s["reasons"] else ""))
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="sagriot-cloud")

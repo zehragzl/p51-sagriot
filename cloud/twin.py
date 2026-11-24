@@ -12,6 +12,10 @@ it has seen happen (watering, faults). From that it gives
                water_now: "if I water now":   soil back to field capacity,
                           and how long until it crosses 70 % again
 
+Model choice: when more models run (models.py: Chronos, Derya's model),
+the state comes from the one with the lowest recent 3 h error
+(ModelSelector); the what-ifs always use the physical baseline.
+
 One direction only (digital shadow): the twin reads the node, it does not
 send anything back yet. The `config` message (twin -> node) comes later.
 
@@ -32,7 +36,10 @@ timer would turn it into a false "thirsty" (seen on the replay of 9 Sept).
 from dataclasses import dataclass, field
 import math
 
-from baseline import Baseline, Decision, Params
+import time
+
+from baseline import Baseline, Decision, Params, decision_from_forecast
+from models import ModelSelector
 
 STATES = {
     "happy":   {"emoji": "😊", "label": "mutlu"},
@@ -56,6 +63,7 @@ class TwinConfig:
     fault_hold_min: float | None = None  # None: until watering or ack_fault()
     probe_air_vwc: float = 1.0       # below this the probe is not in soil
     what_if_hours: float = 120       # how far the what-ifs look (5 days: one dry-down)
+    score_zone: tuple = (60.0, 85.0)  # soil_fc band where model forecasts are scored
 
 
 def _missing(v):
@@ -73,10 +81,16 @@ class Twin:
     last_irrigation_ts: str | None = None
     fault_until_step: int = -1
     fault_reason: str | None = None
+    extra_models: list = field(default_factory=list)   # models.ChronosModel, FunctionModel
+    selector: ModelSelector = None
+    last_decisions: dict = field(default_factory=dict)  # model -> Decision, for the service
+    last_infer_us: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if self.model is None:
             self.model = Baseline(self.params)
+        if self.selector is None:
+            self.selector = ModelSelector(["baseline"] + [m.name for m in self.extra_models])
 
     def _steps(self, minutes):
         return int(math.ceil(minutes / self.params.step_minutes))
@@ -126,6 +140,7 @@ class Twin:
                         self.last_irrigation_ts = r.get("ts")
                     self.last_irrigation_step = self.step
                     self.ack_fault()                    # watered: someone was at the pot
+                    self.selector.discard_pending()     # unforecastable for every model
                 elif change < -self.config.drop_fault and not after_water:
                     hold = self.config.fault_hold_min
                     self.fault_until_step = (-2 if hold is None   # -2: until cleared
@@ -134,8 +149,14 @@ class Twin:
                                          f"bir adımda (prob yerinden oynamış olabilir)")
             self.model.push(vwc, r["air_t"], r["rh"])
             self.prev_vwc = vwc
+            self._run_models(vwc)
+        else:
+            t0 = time.perf_counter()
+            self.last_decisions = {"baseline": self.model.decide()}
+            self.last_infer_us = {"baseline": int((time.perf_counter() - t0) * 1e6)}
 
-        decision = self.model.decide()
+        decision = self.last_decisions["baseline"]
+        used = self.last_decisions.get(self.selector.selected) or decision
         if self.fault_reason and (self.fault_until_step == -2
                                   or self.step <= self.fault_until_step):
             faults.append(self.fault_reason)
@@ -144,11 +165,34 @@ class Twin:
 
         if faults:
             state = "fault"
-        elif decision.now or decision.warn:
+        elif used.now or used.warn:
             state = "thirsty"
         else:
             state = "happy"
-        return decision, self._state_dict(r, state, faults, decision)
+        return decision, self._state_dict(r, state, faults, used)
+
+    def _run_models(self, vwc):
+        """Every model forecasts from the same window; the selector scores them."""
+        t0 = time.perf_counter()
+        decisions = {"baseline": self.model.decide()}
+        timings = {"baseline": int((time.perf_counter() - t0) * 1e6)}
+        forecasts = {"baseline": self.model.last_forecast}
+        for m in self.extra_models:
+            fc = None
+            t0 = time.perf_counter()
+            if self.model.count >= 288:             # same 24 h context as the baseline
+                try:
+                    fc = m.predict(list(self.model.vwc), list(self.model.vpd))
+                except Exception as e:              # a broken model must not stop the twin
+                    print(f"{m.name}: prediction failed ({type(e).__name__}: {e})")
+            timings[m.name] = int((time.perf_counter() - t0) * 1e6)
+            forecasts[m.name] = fc
+            decisions[m.name] = decision_from_forecast(vwc, fc, self.params)
+        lo, hi = self.config.score_zone
+        self.selector.update(vwc, forecasts,
+                             relevant=lo <= self.params.soil_fc(vwc) <= hi)
+        self.last_decisions = decisions
+        self.last_infer_us = timings
 
     def ack_fault(self):
         """Clears a held fault (pot watered, or the probe was checked)."""
@@ -194,6 +238,11 @@ class Twin:
             "air_t": r.get("air_t"), "rh": r.get("rh"), "soil_t": r.get("soil_t"),
             "decision": {"now": d.now, "warn": d.warn, "t_cross_min": d.t_cross_min,
                          "vwc_pred_3h": d.vwc_pred_3h},
+            "selected_model": self.selector.selected,
+            "models": {name: {"now": dd.now, "warn": dd.warn, "t_cross_min": dd.t_cross_min,
+                              "vwc_pred_3h": dd.vwc_pred_3h,
+                              **self.selector.summary().get(name, {})}
+                       for name, dd in self.last_decisions.items()},
             "what_if": self.what_if(),
             "last_irrigation_ts": self.last_irrigation_ts,
             "model": {"fitted": self.model.fitted, "samples": self.model.count,
@@ -211,10 +260,12 @@ class Twin:
                 "last_irrigation_step": self.last_irrigation_step,
                 "last_irrigation_ts": self.last_irrigation_ts,
                 "fault_until_step": self.fault_until_step,
-                "fault_reason": self.fault_reason}
+                "fault_reason": self.fault_reason,
+                "selector": self.selector.to_dict()}
 
     def load_dict(self, data):
         self.model.load_dict(data.get("model", {}))
+        self.selector.load_dict(data.get("selector", {}))
         for key in ("step", "prev_vwc", "last_irrigation_step", "last_irrigation_ts",
                     "fault_until_step", "fault_reason"):
             if key in data:
