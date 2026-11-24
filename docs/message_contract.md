@@ -129,6 +129,26 @@ Published by the digital twin, retained, read by the node when it wakes
   config has been received. The node sends at once whenever its own decision
   has `warn` or `now`, whatever `send_every` says.
 
+## Status payload
+
+On every connect (retained):
+
+```json
+{"v":1, "node":"node01", "state":"online", "source":"sensors"}
+```
+
+On a cycle where a sensor could not be read (retained, after the reading):
+
+```json
+{"v":1, "node":"node01", "state":"error", "source":"sensors", "seq":1042,
+ "err":2, "sht31":"ESP_OK", "probe":"ESP_ERR_TIMEOUT"}
+```
+
+`err` uses the same bits as the reading: bit 0 SHT31, bit 1 probe.
+`sht31` / `probe` are the ESP-IDF error names (`ESP_ERR_TIMEOUT`: no answer,
+`ESP_ERR_INVALID_CRC`: corrupted answer, `ESP_FAIL` / `ESP_ERR_INVALID_STATE`:
+bus not set up or device not found).
+
 ## Field notes
 
 - `seq`: increases by 1 every cycle; the Pi uses gaps to count lost cycles.
@@ -158,6 +178,6 @@ Published by the digital twin, retained, read by the node when it wakes
 - Final probe fields depend on Rüya's driver.
 - Cycle interval (5, 10 or 15 min) not decided yet.
 - Decision content (which fields, which models) to be agreed by the team.
-- `seq` restarts at 0 on reboot; add a per-boot id (or keep seq in RTC memory
-  across deep sleep) so cycles stay unique. Until then the gateway pairs by
-  seq + arrival time.
+- `seq` is kept in RTC memory across deep sleep (`CONFIG_SAGRIOT_DEEP_SLEEP`),
+  but still restarts at 0 on power-on or a crash; a per-boot id would make
+  cycles unique. Until then the gateway pairs by seq + arrival time.

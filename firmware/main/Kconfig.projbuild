@@ -8,6 +8,13 @@ menu "SAgrIoT node"
         string "Wi-Fi password"
         default ""
 
+    config SAGRIOT_WIFI_EAP_IDENTITY
+        string "WPA2-Enterprise identity (empty: WPA2-Personal)"
+        default ""
+        help
+            For a campus network that asks for a user name, e.g.
+            name@school.edu. The password above is used with it.
+
     config SAGRIOT_MQTT_URI
         string "MQTT broker URI"
         default "mqtt://192.168.1.10:1883"
@@ -27,5 +34,35 @@ menu "SAgrIoT node"
         help
             A real node uses 300000 (5 min). Replay tests use a short
             period so hours of data go through in minutes.
+
+    choice SAGRIOT_SOURCE
+        prompt "Where samples come from"
+        default SAGRIOT_SOURCE_REPLAY
+
+        config SAGRIOT_SOURCE_REPLAY
+            bool "Recorded log (components/replay)"
+
+        config SAGRIOT_SOURCE_SENSORS
+            bool "Sensors (SHT31 + RS485 probe, components/sensors)"
+    endchoice
+
+    config SAGRIOT_DEEP_SLEEP
+        bool "Deep sleep between cycles"
+        default n
+        help
+            One cycle per wake: read, decide, send, wait for the broker's
+            acknowledgement, then deep sleep for the rest of the period.
+            The 24 h buffer and seq stay in RTC memory. Needs a period
+            well above the Wi-Fi + MQTT connect time (use 300000).
+            Off: the node stays awake and loops (replay tests).
+
+    config SAGRIOT_CONNECT_TIMEOUT_MS
+        int "Deep sleep: give up on Wi-Fi + MQTT after (ms)"
+        default 15000
+        range 1000 120000
+        depends on SAGRIOT_DEEP_SLEEP
+        help
+            If the gateway cannot be reached in this time, the cycle is
+            counted as lost and the node sleeps anyway (saves battery).
 
 endmenu

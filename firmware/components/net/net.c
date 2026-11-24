@@ -8,17 +8,21 @@
  */
 #include "net.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
+#include "esp_eap_client.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/task.h"
 #include "mqtt_client.h"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
@@ -26,6 +30,10 @@
 static const char *TAG = "net";
 
 #define MQTT_UP BIT0
+
+/* QoS 1 messages sent but not yet acknowledged by the broker (PUBACK).
+ * net_flush() waits for this to reach 0 before the node sleeps. */
+static atomic_int s_unacked;
 
 static EventGroupHandle_t s_events;
 static esp_mqtt_client_handle_t s_mqtt;
@@ -62,10 +70,18 @@ static void mqtt_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     switch ((esp_mqtt_event_id_t)id) {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT connected to %s", CONFIG_SAGRIOT_MQTT_URI);
-        esp_mqtt_client_publish(s_mqtt, s_status_topic, s_online, 0, 1, 1);
+        atomic_fetch_add(&s_unacked, 1);   /* its PUBACK is counted below too */
+        if (esp_mqtt_client_publish(s_mqtt, s_status_topic, s_online, 0, 1, 1) < 0) {
+            atomic_fetch_sub(&s_unacked, 1);
+        }
         subscribe("cloud_decision");
         subscribe("config");
         xEventGroupSetBits(s_events, MQTT_UP);
+        break;
+    case MQTT_EVENT_PUBLISHED:   /* PUBACK for a QoS 1 message */
+        if (atomic_load(&s_unacked) > 0) {
+            atomic_fetch_sub(&s_unacked, 1);
+        }
         break;
     case MQTT_EVENT_DATA: {
         esp_mqtt_event_handle_t e = (esp_mqtt_event_handle_t)data;
@@ -154,6 +170,20 @@ void net_start(const char *online_status)
     strlcpy((char *)wc.sta.password, CONFIG_SAGRIOT_WIFI_PASSWORD, sizeof wc.sta.password);
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
+
+    /* WPA2-Enterprise (e.g. a campus network): identity set -> PEAP/TTLS
+     * with that identity and the password above; the server certificate
+     * is not checked. Empty identity: normal WPA2-Personal. */
+    const char *eap_id = CONFIG_SAGRIOT_WIFI_EAP_IDENTITY;
+    if (eap_id[0] != '\0') {
+        const char *pw = CONFIG_SAGRIOT_WIFI_PASSWORD;
+        ESP_ERROR_CHECK(esp_eap_client_set_identity((const unsigned char *)eap_id, strlen(eap_id)));
+        ESP_ERROR_CHECK(esp_eap_client_set_username((const unsigned char *)eap_id, strlen(eap_id)));
+        ESP_ERROR_CHECK(esp_eap_client_set_password((const unsigned char *)pw, strlen(pw)));
+        ESP_ERROR_CHECK(esp_wifi_sta_enterprise_enable());
+        ESP_LOGI(TAG, "WPA2-Enterprise as \"%s\"", eap_id);
+    }
+
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_LOGI(TAG, "connecting to Wi-Fi \"%s\"", CONFIG_SAGRIOT_WIFI_SSID);
 }
@@ -177,12 +207,48 @@ int net_publish(const char *kind, const char *json, int qos, bool retain)
     }
     char topic[64];
     snprintf(topic, sizeof topic, "sagriot/%s/%s", CONFIG_SAGRIOT_NODE_ID, kind);
-    return esp_mqtt_client_publish(s_mqtt, topic, json, 0, qos, retain ? 1 : 0);
+    if (qos > 0) {
+        atomic_fetch_add(&s_unacked, 1);   /* before publishing: the PUBACK can arrive first */
+    }
+    int id = esp_mqtt_client_publish(s_mqtt, topic, json, 0, qos, retain ? 1 : 0);
+    if (id < 0 && qos > 0) {
+        atomic_fetch_sub(&s_unacked, 1);
+    }
+    return id;
+}
+
+bool net_flush(int timeout_ms)
+{
+    int64_t end = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
+    while (atomic_load(&s_unacked) > 0 && esp_timer_get_time() < end) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return atomic_load(&s_unacked) <= 0;
+}
+
+void net_stop(void)
+{
+    if (s_mqtt_started) {
+        /* clean DISCONNECT: the broker does not send the "offline" will,
+         * so a sleeping node is not reported as dead every cycle */
+        esp_mqtt_client_disconnect(s_mqtt);
+        esp_mqtt_client_stop(s_mqtt);
+    }
+    esp_wifi_disconnect();
+    esp_wifi_stop();
 }
 
 void net_set_rx_handler(net_rx_handler_t handler)
 {
     s_rx_handler = handler;
+}
+
+bool net_wait_time_synced(int timeout_ms)
+{
+    if (net_time_synced()) {
+        return true;
+    }
+    return esp_netif_sntp_sync_wait(pdMS_TO_TICKS(timeout_ms)) == ESP_OK;
 }
 
 bool net_time_synced(void)

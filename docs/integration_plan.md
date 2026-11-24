@@ -51,8 +51,8 @@ uyan -> sensörleri oku -> 24 saatlik tampona ekle -> karar ver
 
 ```c
 typedef struct {
-    float vwc;      // % (prob, register 0x0001 / 100)
-    float soil_t;   // °C (prob, register 0x0000 / 100, işaretli)
+    float vwc;      // % (prob, register 0x0000 / 10)
+    float soil_t;   // °C (prob, register 0x0001 / 10, işaretli)
     float ec;       // µS/cm (prob, register 0x0002)
     float air_t;    // °C (SHT31)
     float rh;       // % (SHT31)
@@ -80,7 +80,8 @@ Okunamayan değer `NAN` olur; düğüm onu `null` olarak gönderir.
 1. Sürücü bileşeni (`CMakeLists.txt` ile), PC'de ya da ESP'de testi ve
    pin bağlantılarını gösteren kısa bir README.
 2. Probun Pi'deki eski kayıtla aynı değerleri verdiğinin kontrolü
-   (register sırası: önce sıcaklık, sonra nem).
+   (20 Kasım ölçümü: 0x0000 nem, 0x0001 sıcaklık, ikisi de ×10; plandaki
+   "önce sıcaklık, ×100" bu probda geçerli değil).
 3. Akım tablosu: aktif (240 MHz), Wi-Fi gönderim, light sleep, deep sleep;
    prob açık/kapalı. Çip ve kart ayrı yazılmalı.
 4. Ortak GND: 12 V adaptör, ESP ve RS485 modülü aynı toprakta.
