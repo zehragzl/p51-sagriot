@@ -28,6 +28,7 @@ LEFT JOIN decisions e ON e.source = 'edge'  AND e.node = r.node AND e.seq = r.se
      AND e.received_ms BETWEEN r.received_ms - 10000 AND r.received_ms + 10000
 LEFT JOIN decisions c ON c.source = 'cloud' AND c.node = r.node AND c.seq = r.seq
      AND c.received_ms BETWEEN r.received_ms AND r.received_ms + 60000
+     AND c.model = ?
 WHERE r.received_ms >= ?
 ORDER BY r.received_ms
 """
@@ -41,12 +42,14 @@ def main():
     parser.add_argument("--csv", default=None, help="also write every paired cycle")
     parser.add_argument("--minutes", type=float, default=None,
                         help="only readings from the last N minutes")
+    parser.add_argument("--model", default="baseline",
+                        help="cloud model to pair with the edge (baseline, chronos, ...)")
     args = parser.parse_args()
 
     since = 0
     if args.minutes:
         since = int((time.time() - args.minutes * 60) * 1000)
-    rows = sqlite3.connect(args.db).execute(QUERY, (since,)).fetchall()
+    rows = sqlite3.connect(args.db).execute(QUERY, (args.model, since)).fetchall()
     both = [r for r in rows if r[3] is not None and r[7] is not None]
     only_edge = sum(1 for r in rows if r[3] is not None and r[7] is None)
     only_cloud = sum(1 for r in rows if r[3] is None and r[7] is not None)
