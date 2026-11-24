@@ -21,6 +21,14 @@ bool net_is_ready(void);
  * Returns the MQTT message id (>= 0), or -1 if not connected. */
 int net_publish(const char *kind, const char *json, int qos, bool retain);
 
+/* Waits up to timeout_ms until the broker has acknowledged every QoS 1
+ * message (PUBACK). Call it before deep sleep: publish only queues the
+ * message, it may not have left the chip yet. True if all were acked. */
+bool net_flush(int timeout_ms);
+
+/* Clean MQTT disconnect (no "offline" will), then Wi-Fi off. */
+void net_stop(void);
+
 /* Messages from the gateway/cloud. The node subscribes to
  * sagriot/<node>/cloud_decision and sagriot/<node>/config; each message is
  * passed to the handler with its kind (last topic part). data is NOT
@@ -30,3 +38,7 @@ void net_set_rx_handler(net_rx_handler_t handler);
 
 /* True once SNTP has set the clock. */
 bool net_time_synced(void);
+
+/* Waits up to timeout_ms for SNTP if the clock is not set yet (after a
+ * power-on; the clock survives deep sleep). True if the clock is set. */
+bool net_wait_time_synced(int timeout_ms);

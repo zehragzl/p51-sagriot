@@ -1,0 +1,51 @@
+menu "SAgrIoT sensors"
+
+    config SAGRIOT_I2C_SDA_GPIO
+        int "SHT31 SDA pin"
+        default 8
+
+    config SAGRIOT_I2C_SCL_GPIO
+        int "SHT31 SCL pin"
+        default 9
+
+    config SAGRIOT_RS485_TX_GPIO
+        int "RS485 module DI (ESP TX) pin"
+        default 17
+
+    config SAGRIOT_RS485_RX_GPIO
+        int "RS485 module RO (ESP RX) pin"
+        default 18
+
+    config SAGRIOT_RS485_DE_GPIO
+        int "RS485 module DE+RE pin (-1: auto-direction module)"
+        default -1
+        range -1 48
+
+    config SAGRIOT_PROBE_BAUD
+        int "Probe baud rate"
+        default 9600
+
+    config SAGRIOT_PROBE_SLAVE_ID
+        int "Probe Modbus address"
+        default 1
+        range 1 247
+
+    config SAGRIOT_PROBE_PWR_GPIO
+        int "Probe power MOSFET gate pin (-1: probe always on)"
+        default -1
+        range -1 48
+
+    config SAGRIOT_PROBE_PWR_ACTIVE_LOW
+        bool "Probe power is on when the pin is low (P-MOSFET, high side)"
+        default y
+
+    config SAGRIOT_PROBE_WARMUP_MS
+        int "Probe warm-up after power on (ms)"
+        default 1000
+        range 0 10000
+        help
+            Time from switching the probe on to the first Modbus request.
+            Check the probe's datasheet; too short gives timeouts or
+            wrong first values.
+
+endmenu

@@ -26,6 +26,7 @@ SELECT r.node, r.seq, r.received_ms,
 FROM readings r
 LEFT JOIN decisions e ON e.source = 'edge'  AND e.node = r.node AND e.seq = r.seq
      AND e.received_ms BETWEEN r.received_ms - 10000 AND r.received_ms + 10000
+     AND COALESCE(e.model, 'baseline') = ?
 LEFT JOIN decisions c ON c.source = 'cloud' AND c.node = r.node AND c.seq = r.seq
      AND c.received_ms BETWEEN r.received_ms AND r.received_ms + 60000
      AND c.model = ?
@@ -43,13 +44,16 @@ def main():
     parser.add_argument("--minutes", type=float, default=None,
                         help="only readings from the last N minutes")
     parser.add_argument("--model", default="baseline",
-                        help="cloud model to pair with the edge (baseline, chronos, ...)")
+                        help="cloud model to pair with the edge (baseline, chronos, ...); "
+                             "'tinyml' pairs the node's tinyml with the cloud's "
+                             "(the cloud's is bias-corrected, the node's is not)")
     args = parser.parse_args()
 
     since = 0
     if args.minutes:
         since = int((time.time() - args.minutes * 60) * 1000)
-    rows = sqlite3.connect(args.db).execute(QUERY, (args.model, since)).fetchall()
+    edge_model = "tinyml" if args.model == "tinyml" else "baseline"
+    rows = sqlite3.connect(args.db).execute(QUERY, (edge_model, args.model, since)).fetchall()
     both = [r for r in rows if r[3] is not None and r[7] is not None]
     only_edge = sum(1 for r in rows if r[3] is not None and r[7] is None)
     only_cloud = sum(1 for r in rows if r[3] is None and r[7] is not None)

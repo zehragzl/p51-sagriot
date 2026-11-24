@@ -2,6 +2,15 @@
 # After changing it, delete firmware/sdkconfig so the new values are read.
 CONFIG_SAGRIOT_WIFI_SSID="wifi-name"
 CONFIG_SAGRIOT_WIFI_PASSWORD="wifi-password"
+# Campus (WPA2-Enterprise) network: your user name here; leave empty at home
+CONFIG_SAGRIOT_WIFI_EAP_IDENTITY=""
 CONFIG_SAGRIOT_MQTT_URI="mqtt://192.168.1.10:1883"
 CONFIG_SAGRIOT_NODE_ID="node01"
 CONFIG_SAGRIOT_PERIOD_MS=2000
+
+# Real node: sensors + deep sleep, one cycle every 5 min
+# CONFIG_SAGRIOT_SOURCE_SENSORS=y
+# CONFIG_SAGRIOT_DEEP_SLEEP=y
+# CONFIG_SAGRIOT_PERIOD_MS=300000
+# CONFIG_SAGRIOT_PROBE_PWR_GPIO=-1
+# CONFIG_SAGRIOT_RS485_DE_GPIO=-1
