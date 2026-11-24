@@ -8,6 +8,7 @@ with Derya's float model in Python (`cloud/derya_model.py`, embedded in
 windows, the baseline.
 
 Targets: same decision >= 99 %, model <= 50 KB flash, time measured.
+Replay code and expected values: `main/`.
 
 ## Result on the PC (host build, gcc, not the chip)
 
@@ -19,9 +20,26 @@ Targets: same decision >= 99 %, model <= 50 KB flash, time measured.
 The 5 mismatches are windows where the forecast passes within a few
 hundredths of a VWC point of the 70 % line.
 
-## Result on the ESP32-S3
+## Result on the ESP32-S3 (24 Nov 2026, Zehra's ESP32-S3 board, 240 MHz, ESP-IDF v5.3)
 
-To be measured (26 Nov). Copy the monitor output here.
+| | Target | Measured |
+|---|---|---|
+| Same decision as Python (float) | >= 99 % | 5728/5733 = 99.91 % |
+| 3 h forecast vs Python | | mean 0.0019, max 0.0079 VWC points |
+| Model in flash | <= 50 KB | 31,536 B |
+| tinyml forecast + decide | | mean 0.748 ms, max 2.15 ms |
+| baseline fit + decide (same windows) | | mean 0.081 ms, max 0.114 ms |
+| RAM | | 24 h buffer 2,332 B (shared with the baseline) + peak stack 1,136 B |
+
+Whole replay of 6,020 samples: 5.12 s. The chip gives the same numbers as
+the PC build for decisions and forecasts (float32 on both).
+
+The learned model is about 9x slower than the baseline (20,736 weight
+reads per forecast against two passes over 288 samples), but both are far
+below one node cycle; energy per decision is still to be measured with
+the power setup. The max (2.15 ms) is likely flash-cache misses: the
+31.5 KB of weights are read from flash through the cache (not measured
+separately).
 
 ## Run
 
