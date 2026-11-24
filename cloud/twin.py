@@ -193,6 +193,7 @@ class Twin:
                              relevant=lo <= self.params.soil_fc(vwc) <= hi)
         self.last_decisions = decisions
         self.last_infer_us = timings
+        self._last_forecasts = forecasts
 
     def ack_fault(self):
         """Clears a held fault (pot watered, or the probe was checked)."""
@@ -224,8 +225,28 @@ class Twin:
             "vwc_after": p.field_capacity,
             "warn_in_min": self._minutes_until_below(wet, p.fc_warn_low),
         }
-        return {"horizon_h": self.config.what_if_hours,
+        # curves for the panel: the next 24 h, one point every 30 min
+        every, n = self._steps(30), self._steps(24 * 60)
+        no_water["curve"] = [round(max(float(v), 0.0), 2) for v in dry[every - 1:n:every]]
+        water_now["curve"] = [round(max(float(v), 0.0), 2) for v in wet[every - 1:n:every]]
+        return {"horizon_h": self.config.what_if_hours, "curve_step_min": every * self.params.step_minutes,
                 "no_water": no_water, "water_now": water_now}
+
+    def _forecast_curve(self):
+        """3 h forecast of the model the twin follows (None before 24 h)."""
+        fc = None
+        if self.selector.selected == "baseline":
+            fc = self.model.last_forecast
+        else:
+            fc = getattr(self, "_last_forecasts", {}).get(self.selector.selected)
+        return None if fc is None else [round(float(v), 2) for v in fc]
+
+    def _drying_per_day(self):
+        """VWC points lost per day at the current VPD (physical model)."""
+        if not self.model.fitted:
+            return None
+        per_step = -self.model.rate_per_step(self.model.vpd[-1])
+        return round(per_step * 24 * 60 / self.params.step_minutes, 2)
 
     # -- output --------------------------------------------------------------
     def _state_dict(self, r, state, faults, d: Decision):
@@ -250,7 +271,11 @@ class Twin:
                       "a": round(self.model.a, 5) if self.model.fitted else None,
                       "c": round(self.model.c, 5) if self.model.fitted else None},
             "params": {"field_capacity": self.params.field_capacity,
-                       "step_minutes": self.params.step_minutes},
+                       "step_minutes": self.params.step_minutes,
+                       "warn_vwc": round(self.params.vwc_line(self.params.fc_warn_low), 2),
+                       "crit_vwc": round(self.params.vwc_line(self.params.fc_crit_low), 2)},
+            "forecast": self._forecast_curve(),
+            "drying_per_day": self._drying_per_day(),
         }
 
     # -- persistence ---------------------------------------------------------

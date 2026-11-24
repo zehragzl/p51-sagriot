@@ -54,6 +54,10 @@ connects later sees the latest state at once.
 - `what_if` is `null` until the model has 24 h of readings. A `null`
   minute value means "not within `horizon_h`"; `0` means "already below".
 - `water_now` assumes watering brings the soil back to field capacity.
+- `forecast`: the followed model's 3 h forecast (36 VWC values, `null`
+  before 24 h). `what_if.*.curve`: the next 24 h every `curve_step_min`
+  minutes, for the panel. `drying_per_day`: VWC points lost per day at
+  the current VPD. `params.warn_vwc` / `crit_vwc`: the 70 % / 60 % FC lines.
 - `models`: one entry per model the cloud runs (`--model`), each with its
   decision and its recent 3 h error; `selected_model` is the one the state
   comes from (`cloud/models.py`, ModelSelector). `decision` is that model's.
