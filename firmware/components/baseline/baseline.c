@@ -171,6 +171,13 @@ int baseline_forecast(const baseline_t *b, vpd_mode_t mode,
  */
 baseline_decision_t baseline_decide(const baseline_t *b, vpd_mode_t mode)
 {
+    float forecast[BASELINE_HORIZON];
+    bool have = b->count > 0 && baseline_forecast(b, mode, forecast) == 0;
+    return baseline_decide_forecast(b, have ? forecast : NULL);   /* no fit yet: only "now" */
+}
+
+baseline_decision_t baseline_decide_forecast(const baseline_t *b, const float *forecast)
+{
     baseline_decision_t d = { .irrigate_now = false, .warn = false,
                               .when_minutes = -1 };
 
@@ -184,11 +191,9 @@ baseline_decision_t baseline_decide(const baseline_t *b, vpd_mode_t mode)
     float vwc_now = b->vwc[chrono_index(b, (uint16_t)(b->count - 1))];
     d.irrigate_now = vwc_now < vwc_line;
 
-    float forecast[BASELINE_HORIZON];
-    if (baseline_forecast(b, mode, forecast) != 0) {
-        return d;            /* no fit yet: only the "now" decision */
+    if (forecast == NULL) {
+        return d;
     }
-
     for (int k = 1; k <= BASELINE_HORIZON; k++) {
         if (forecast[k - 1] < vwc_line) {
             d.warn = true;

@@ -46,5 +46,8 @@ bool baseline_fit(baseline_t *b);
 int  baseline_forecast(const baseline_t *b, vpd_mode_t mode,
                        float out_vwc[BASELINE_HORIZON]);
 baseline_decision_t baseline_decide(const baseline_t *b, vpd_mode_t mode);
+/* The same rule on any 36-step forecast (e.g. tinyml's); NULL = only "now". */
+baseline_decision_t baseline_decide_forecast(const baseline_t *b,
+                                             const float *forecast);
 
 #endif /* BASELINE_H */
