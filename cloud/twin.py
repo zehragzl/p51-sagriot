@@ -27,6 +27,11 @@ Fault checks, and why each threshold:
     internship record the largest 5-min drop outside watering was 0.96
     points; the probe displacement of 9 Sept fell 12.8 points in 12 min.
     Drops in the hour after watering are drainage and are not faults.
+A reported watering (Telegram "Suladım") is only a claim: the twin marks
+it pending and waits for the VWC rise. If the rise comes it is
+confirmed; if it does not come within 30 min the twin raises a fault (the
+water did not reach the probe, or the probe is out of place).
+
 A sudden-drop fault stays until the pot is watered or someone confirms the
 probe was checked (ack_fault(), later a Telegram button). After a displaced
 probe every later reading is on a new baseline, so the twin cannot tell by
@@ -64,6 +69,7 @@ class TwinConfig:
     probe_air_vwc: float = 1.0       # below this the probe is not in soil
     what_if_hours: float = 120       # how far the what-ifs look (5 days: one dry-down)
     score_zone: tuple = (60.0, 85.0)  # soil_fc band where model forecasts are scored
+    watering_check_min: float = 30   # a reported watering must show in VWC within this
 
 
 def _missing(v):
@@ -81,6 +87,10 @@ class Twin:
     last_irrigation_ts: str | None = None
     fault_until_step: int = -1
     fault_reason: str | None = None
+    watering_reported_step: int | None = None   # farmer said "Suladım", not yet seen
+    watering_reported_ts: str | None = None
+    watering_status: str | None = None          # pending / confirmed / unconfirmed
+    last_reading: dict | None = None
     extra_models: list = field(default_factory=list)   # models.ChronosModel, FunctionModel
     selector: ModelSelector = None
     last_decisions: dict = field(default_factory=dict)  # model -> Decision, for the service
@@ -140,6 +150,11 @@ class Twin:
                         self.last_irrigation_ts = r.get("ts")
                     self.last_irrigation_step = self.step
                     self.ack_fault()                    # watered: someone was at the pot
+                    if self.watering_status in ("pending", "unconfirmed"):
+                        self.watering_status = "confirmed"   # the sensor agrees
+                        self.watering_reported_step = self.step
+                    else:
+                        self.watering_status = None     # watered without a report
                     self.selector.discard_pending()     # unforecastable for every model
                 elif change < -self.config.drop_fault and not after_water:
                     hold = self.config.fault_hold_min
@@ -155,21 +170,45 @@ class Twin:
             self.last_decisions = {"baseline": self.model.decide()}
             self.last_infer_us = {"baseline": int((time.perf_counter() - t0) * 1e6)}
 
-        decision = self.last_decisions["baseline"]
-        used = self.last_decisions.get(self.selector.selected) or decision
+        self.last_reading = r
+        since = None if self.watering_reported_step is None else self.step - self.watering_reported_step
+        if self.watering_status == "pending" and since >= self._steps(self.config.watering_check_min):
+            self.watering_status = "unconfirmed"
+        elif self.watering_status == "confirmed" and since > self._steps(60):
+            self.watering_status = None                 # announced; forget it after an hour
+        return self.last_decisions["baseline"], self._compose(r, faults)
+
+    def _compose(self, r, faults):
+        """State from the last decisions, the reading's faults and the held ones."""
+        faults = list(faults)
+        used = self.last_decisions.get(self.selector.selected) or self.last_decisions["baseline"]
         if self.fault_reason and (self.fault_until_step == -2
                                   or self.step <= self.fault_until_step):
             faults.append(self.fault_reason)
+        if self.watering_status == "unconfirmed":
+            faults.append(f"sulama bildirildi ama {self.config.watering_check_min:.0f} dk içinde "
+                          f"nem artmadı (su proba ulaşmamış ya da prob yerinden çıkmış olabilir)")
         if self.model.count == 0 and not faults:
             faults.append("henüz geçerli okuma yok")
-
         if faults:
             state = "fault"
         elif used.now or used.warn:
             state = "thirsty"
         else:
             state = "happy"
-        return decision, self._state_dict(r, state, faults, used)
+        return self._state_dict(r, state, faults, used)
+
+    def report_watering(self, ts=None):
+        """The farmer said "Suladım" (Telegram). Only the next readings can confirm it."""
+        self.watering_reported_step = self.step
+        self.watering_reported_ts = ts
+        self.watering_status = "pending"
+
+    def current_state(self):
+        """State dict for the last reading again (after a button, without a new reading)."""
+        if self.last_reading is None:
+            return None
+        return self._compose(self.last_reading, self._sensor_faults(self.last_reading))
 
     def _run_models(self, vwc):
         """Every model forecasts from the same window; the selector scores them."""
@@ -199,6 +238,8 @@ class Twin:
         """Clears a held fault (pot watered, or the probe was checked)."""
         self.fault_until_step = -1
         self.fault_reason = None
+        if self.watering_status == "unconfirmed":
+            self.watering_status = None
 
     # -- what-ifs ------------------------------------------------------------
     def _minutes_until_below(self, forecast, fc_line):
@@ -266,6 +307,8 @@ class Twin:
                        for name, dd in self.last_decisions.items()},
             "what_if": self.what_if(),
             "last_irrigation_ts": self.last_irrigation_ts,
+            "watering": {"status": self.watering_status,
+                         "reported_ts": self.watering_reported_ts},
             "model": {"fitted": self.model.fitted, "samples": self.model.count,
                       "needed": 288,
                       "a": round(self.model.a, 5) if self.model.fitted else None,
@@ -284,14 +327,21 @@ class Twin:
                 "prev_vwc": self.prev_vwc,
                 "last_irrigation_step": self.last_irrigation_step,
                 "last_irrigation_ts": self.last_irrigation_ts,
+            "watering": {"status": self.watering_status,
+                         "reported_ts": self.watering_reported_ts},
                 "fault_until_step": self.fault_until_step,
                 "fault_reason": self.fault_reason,
+                "watering_reported_step": self.watering_reported_step,
+                "watering_reported_ts": self.watering_reported_ts,
+                "watering_status": self.watering_status,
+                "last_reading": self.last_reading,
                 "selector": self.selector.to_dict()}
 
     def load_dict(self, data):
         self.model.load_dict(data.get("model", {}))
         self.selector.load_dict(data.get("selector", {}))
         for key in ("step", "prev_vwc", "last_irrigation_step", "last_irrigation_ts",
-                    "fault_until_step", "fault_reason"):
+                    "fault_until_step", "fault_reason", "watering_reported_step",
+                    "watering_reported_ts", "watering_status", "last_reading"):
             if key in data:
                 setattr(self, key, data[key])

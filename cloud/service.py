@@ -9,8 +9,10 @@ Replaces fake_cloud.py. For every `sagriot/<node>/reading`:
        sagriot/<node>/cloud_decision   model "baseline", same seq (QoS 1)
        sagriot/<node>/twin             state, reasons, what-ifs (QoS 1, retained)
 
-Listens to `sagriot/<node>/twin_ack` too: any message there clears a held
-fault (probe checked). The Telegram bot will send it from a button.
+Listens to `sagriot/<node>/twin_ack` (clears a held fault, probe checked)
+and `sagriot/<node>/feedback` (a "watered" press marks a watering as
+reported; the twin waits for the VWC rise to confirm it). Both republish
+the twin state at once.
 
 One buffer step = one node cycle, as on the node; set step_minutes to the
 node's period so the forecast minutes are right (5 in the field, the 10 s
@@ -89,9 +91,21 @@ class Service:
         node, kind = parts[1], parts[2]
 
         if kind == "twin_ack":
-            self.twin(node).ack_fault()
+            twin = self.twin(node)
+            twin.ack_fault()
             self._save(node)
-            return []
+            return self._republish(node, twin)
+        if kind == "feedback":
+            try:
+                action = json.loads(payload).get("action")
+            except (ValueError, AttributeError):
+                return []
+            if action != "watered":
+                return []
+            twin = self.twin(node)
+            twin.report_watering(json.loads(payload).get("time"))
+            self._save(node)
+            return self._republish(node, twin)
         if kind != "reading":
             return []
         try:
@@ -117,6 +131,11 @@ class Service:
             out.append((f"sagriot/{node}/cloud_decision", json.dumps(cloud_decision), False))
         out.append((f"sagriot/{node}/twin", json.dumps(state, ensure_ascii=False), True))
         return out
+
+    def _republish(self, node, twin):
+        state = twin.current_state()
+        return [] if state is None else [
+            (f"sagriot/{node}/twin", json.dumps(state, ensure_ascii=False), True)]
 
 
 def max_rss_mb():
@@ -148,7 +167,8 @@ def main():
 
     def on_connect(client, userdata, flags, reason_code, properties):
         print(f"connected to {args.host}:{args.port} ({reason_code})")
-        client.subscribe([("sagriot/+/reading", 1), ("sagriot/+/twin_ack", 1)])
+        client.subscribe([("sagriot/+/reading", 1), ("sagriot/+/twin_ack", 1),
+                          ("sagriot/+/feedback", 1)])
 
     def on_message(client, userdata, message):
         nonlocal handled

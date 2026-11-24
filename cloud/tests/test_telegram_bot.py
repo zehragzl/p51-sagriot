@@ -103,3 +103,16 @@ def test_state_text_with_and_without_what_if():
     assert "Şimdi sularsam: eşiğe yeniden yaklaşık 1.4 gün sonra" in text
     wi["no_water"]["warn_in_min"] = 125
     assert "2 sa 5 dk sonra" in state_text(twin("happy", what_if=wi))
+
+
+def test_watered_cancels_the_reminder_and_confirmation_is_announced():
+    clock = Clock()
+    n = Notifier(clock)
+    n.on_twin(twin("happy"))
+    n.on_twin(twin("thirsty"))
+    n.on_button("node01", "snooze")
+    reply, _, _ = n.on_button("node01", "watered")
+    assert "ikize bildirdim" in reply and "node01" not in n.remind_at
+    confirmed = {**twin("happy"), "watering": {"status": "confirmed"}}
+    text, _ = n.on_twin(confirmed)
+    assert text.startswith("✅ Sulama doğrulandı")

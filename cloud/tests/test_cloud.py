@@ -221,3 +221,42 @@ def test_cloud_baseline_matches_the_c_port():
             agree += (d.now == bool(int(c["irrigate_now"]))
                       and d.t_cross_min == int(c["when_minutes"]))
     assert total > 5000 and agree / total >= 0.999
+
+
+# -- reported watering (Telegram "Suladım") ------------------------------------
+def test_reported_watering_is_confirmed_by_the_rise():
+    twin = Twin(Params(field_capacity=64.9))
+    twin.process(reading(0, 41.0))
+    _, s = twin.process(reading(1, 40.9))
+    assert s["state"] == "thirsty"
+    twin.report_watering("t-report")
+    s = twin.current_state()
+    assert s["state"] == "thirsty" and s["watering"]["status"] == "pending"
+    _, s = twin.process(reading(2, 60.0))                # the sensor sees it
+    assert s["state"] == "happy" and s["watering"]["status"] == "confirmed"
+
+
+def test_reported_watering_without_a_rise_becomes_a_fault():
+    twin = Twin(Params(field_capacity=64.9, step_minutes=5))
+    twin.process(reading(0, 41.0))
+    twin.report_watering()
+    for k in range(5):                                   # 25 min: still waiting
+        _, s = twin.process(reading(1 + k, 40.9))
+        assert s["state"] == "thirsty"
+    _, s = twin.process(reading(6, 40.9))                # 30 min
+    assert s["state"] == "fault"
+    assert any("sulama bildirildi" in r for r in s["reasons"])
+    twin.ack_fault()
+    _, s = twin.process(reading(7, 40.9))
+    assert s["state"] == "thirsty" and s["watering"]["status"] is None
+
+
+def test_service_takes_the_watered_button_and_republishes():
+    svc = Service()
+    svc.handle("sagriot/n/reading", json.dumps(reading(0, 41.0)))
+    out = svc.handle("sagriot/n/feedback", json.dumps({"action": "watered", "time": "now"}))
+    assert len(out) == 1 and out[0][0] == "sagriot/n/twin" and out[0][2] is True
+    assert json.loads(out[0][1])["watering"]["status"] == "pending"
+    assert svc.handle("sagriot/n/feedback", json.dumps({"action": "not_needed"})) == []
+    out = svc.handle("sagriot/n/twin_ack", "{}")
+    assert out and out[0][0] == "sagriot/n/twin"

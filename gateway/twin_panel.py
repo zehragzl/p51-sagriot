@@ -74,6 +74,12 @@ class Store:
                         self._event(node, ts, "Durum: mutlu")
                 if (s.get("model") or {}).get("fitted") and not (prev.get("model") or {}).get("fitted"):
                     self._event(node, ts, "İkiz 24 saatlik veriyle tahmine başladı")
+                wnew = (s.get("watering") or {}).get("status")
+                if wnew != (prev.get("watering") or {}).get("status"):
+                    if wnew == "pending":
+                        self._event(node, ts, "💧 Sulama bildirildi (Telegram), nem artışı bekleniyor")
+                    elif wnew == "confirmed":
+                        self._event(node, ts, "✅ Sulama sensörle doğrulandı")
                 if s.get("selected_model") != prev.get("selected_model"):
                     self._event(node, ts, f"Karar modeli değişti: {s.get('selected_model')}")
             self.latest[node] = s
@@ -209,8 +215,9 @@ function render(d){
  const sel=nodes.length>1?`<select onchange="node=this.value;tick()">${nodes.map(n=>`<option ${n==node?"selected":""}>${n}</option>`).join("")}</select>`:node;
  $("sub").innerHTML=`${sel} · son okuma ${hm(s.ts)} · Durum: ${s.label} · ${off?"senaryolar kapalı":'senaryo: "'+(sc==="water_now"?"Şimdi sularsam?":"Sulamazsam?")+'"'}`;
  ["happy","thirsty","fault"].forEach(k=>$("p-"+k).classList.toggle("on",s.state===k));
- let say,why;
- if(s.state==="happy"){say="Her şey yolunda, sulamaya gerek yok.";why=wi?`Bugünkü koşullarla eşiğe ${dur(wi.no_water.warn_in_min)} var.`:`Tahmin için veri birikiyor (${s.model.samples}/${s.model.needed}).`}
+ let say,why;const wpend=(s.watering||{}).status==="pending";
+ if(wpend&&s.state!=="fault"){say="Sulandığımı söylediler, nemin artmasını bekliyorum.";why="Sensör nemin arttığını görünce ikiz sulamayı doğrulayacak; 30 dakikada artmazsa uyarı verir."}
+ else if(s.state==="happy"){say="Her şey yolunda, sulamaya gerek yok.";why=wi?`Bugünkü koşullarla eşiğe ${dur(wi.no_water.warn_in_min)} var.`:`Tahmin için veri birikiyor (${s.model.samples}/${s.model.needed}).`}
  else if(s.state==="thirsty"){say=dec.now?"Susadım! Şimdi sulanmam gerek.":`Susadım! ${dur(dec.t_cross_min)} içinde eşiğin altına düşeceğim.`;
   why=s.drying_per_day!=null?`Toprak saatte ${num(s.drying_per_day/24,2)} puan kaybediyor (VPD ${num(s.vpd,2)} kPa).`:"Nem eşiğin altında."}
  else{say="Sensörüm bozuk olabilir.";why=(s.reasons||[]).join(". ")+". Sensör kontrol edilene kadar sulama önerisi verilmiyor."}

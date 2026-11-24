@@ -15,9 +15,9 @@ Every button press is
   - for 🔧 Kontrol ettim, also sent to `sagriot/<node>/twin_ack`, which
     clears a held fault in the twin.
 ⏰ asks for a reminder: if the pot is still thirsty (or faulty) an hour
-later, the message comes again. "✅ Suladım" does not tell
-the twin anything: the twin sees the watering in the next VWC reading,
-and the saved line lets us check the two against each other later.
+later, the message comes again. "✅ Suladım" goes to the twin through
+`feedback`: the twin marks the watering as reported and confirms it only
+when the VWC rise shows up (or raises a fault after 30 min).
 
 Commands: /durum (current state and what-ifs), /start (shows the chat id).
 
@@ -73,6 +73,8 @@ def state_text(s):
         lines.append(f"Hava: {s['air_t']:.1f} °C, %{s['rh']:.0f} nem")
     for reason in s.get("reasons") or []:
         lines.append(f"• {reason}")
+    if (s.get("watering") or {}).get("status") == "pending":
+        lines.append("💧 Sulama bildirildi, nem artışı bekleniyor")
     models = s.get("models") or {}
     if len(models) > 1:
         chosen = s.get("selected_model", "baseline")
@@ -110,8 +112,11 @@ class Notifier:
             return None
         if state == "happy":
             self.remind_at.pop(node, None)
-            if prev == "thirsty":
-                return (f"Toprak toparlandı, teşekkürler.\n\n{state_text(s)}", [])
+            if prev == "thirsty" or (prev == "fault" and (s.get("watering") or {}).get("status") == "confirmed"):
+                head = ("✅ Sulama doğrulandı, toprak toparlandı."
+                        if (s.get("watering") or {}).get("status") == "confirmed"
+                        else "Toprak toparlandı, teşekkürler.")
+                return (f"{head}\n\n{state_text(s)}", [])
             return None             # first message after start, or fault -> happy
         return self._alert(s)
 
@@ -137,7 +142,9 @@ class Notifier:
             publish.append((f"sagriot/{node}/twin_ack", "{}"))
             reply = "Teşekkürler, arıza uyarısını kapattım."
         elif action == "watered":
-            reply = "Teşekkürler! Bir sonraki okumada nemin arttığını görmem gerek."
+            self.remind_at.pop(node, None)
+            reply = ("Teşekkürler! Sulamayı ikize bildirdim. Nemin arttığını görünce doğrulayacağım; "
+                     "30 dakika içinde artmazsa haber veririm.")
         elif action == "not_needed":
             reply = "Not aldım. Bu geri bildirim eşikleri iyileştirmek için kaydedildi."
         else:

@@ -58,6 +58,10 @@ connects later sees the latest state at once.
   before 24 h). `what_if.*.curve`: the next 24 h every `curve_step_min`
   minutes, for the panel. `drying_per_day`: VWC points lost per day at
   the current VPD. `params.warn_vwc` / `crit_vwc`: the 70 % / 60 % FC lines.
+- `watering`: `status` is `pending` after a Telegram "Suladım" (feedback
+  `watered`), `confirmed` when the VWC rise is seen, `unconfirmed` (a fault)
+  if no rise within 30 min; `null` otherwise. The cloud also listens to
+  `sagriot/<node>/feedback` for this.
 - `models`: one entry per model the cloud runs (`--model`), each with its
   decision and its recent 3 h error; `selected_model` is the one the state
   comes from (`cloud/models.py`, ModelSelector). `decision` is that model's.
