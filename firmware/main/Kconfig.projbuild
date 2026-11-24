@@ -46,6 +46,14 @@ menu "SAgrIoT node"
             bool "Sensors (SHT31 + RS485 probe, components/sensors)"
     endchoice
 
+    config SAGRIOT_TINYML
+        bool "Also run Derya's model (components/tinyml)"
+        default y
+        help
+            Sends a second decision message with "model":"tinyml" every
+            cycle, from the same 24 h buffer. 31.5 KB of flash, about
+            0.75 ms per cycle on the ESP32-S3 (experiments/tinyml_bench).
+
     config SAGRIOT_DEEP_SLEEP
         bool "Deep sleep between cycles"
         default n

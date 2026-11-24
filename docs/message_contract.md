@@ -107,7 +107,9 @@ press, with the state the farmer saw; the bot also appends it to
 
 ## Decision payload
 
-One message per model (`baseline`, `tinyml`).
+One message per model (`baseline`, `tinyml`). The node sends `tinyml` when
+built with `CONFIG_SAGRIOT_TINYML` (default on); it is Derya's raw model,
+without the site bias the cloud learns, so the cloud's `tinyml` can differ.
 
 ```json
 {"v":1, "node":"node01", "seq":1042, "ts":"2026-11-03T10:15:00Z",

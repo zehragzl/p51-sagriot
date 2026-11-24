@@ -8,7 +8,9 @@
  *
  * Every cycle the node publishes two messages (docs/message_contract.md):
  *   .../reading  : the raw sample; the gateway forwards it to the cloud
- *   .../decision : the decision made on the chip (baseline)
+ *   .../decision : the decision made on the chip, one message per model:
+ *                  "baseline" and, with CONFIG_SAGRIOT_TINYML, "tinyml"
+ *                  (Derya's model, components/tinyml, same 24 h buffer)
  * The gateway keeps the edge decision, receives the cloud's decision for
  * the same seq and compares the two. The node does not wait for the cloud.
  *
@@ -24,8 +26,12 @@
 #include <string.h>
 #include <time.h>
 
+#include "sdkconfig.h"
 #include "baseline.h"
 #include "replay_data.h"
+#if CONFIG_SAGRIOT_TINYML
+#include "tinyml.h"
+#endif
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
@@ -33,7 +39,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "net.h"
-#include "sdkconfig.h"
 #if CONFIG_SAGRIOT_SOURCE_SENSORS
 #include "sensors.h"
 #endif
@@ -128,6 +133,21 @@ static void build_reading(char *msg, size_t n, uint32_t seq, const char *ts, sam
              s.err, esp_timer_get_time() / 1000);
 }
 
+/* decision message for one model's forecast (NULL: no forecast yet). */
+static void fmt_decision(char *msg, size_t n, uint32_t seq, const char *ts, const char *model,
+                         baseline_decision_t d, const float *forecast, int64_t infer_us)
+{
+    char pred[16];
+    fmt_num(pred, sizeof pred, forecast ? forecast[BASELINE_HORIZON - 1] : NAN, 2);
+    snprintf(msg, n,
+             "{\"v\":1,\"node\":\"%s\",\"seq\":%" PRIu32 ",\"ts\":%s,\"model\":\"%s\","
+             "\"now\":%s,\"warn\":%s,\"t_cross_min\":%d,\"vwc_pred_3h\":%s,"
+             "\"infer_us\":%" PRId64 ",\"t_send_ms\":%" PRId64 "}",
+             CONFIG_SAGRIOT_NODE_ID, seq, ts, model, d.irrigate_now ? "true" : "false",
+             d.warn ? "true" : "false", d.when_minutes, pred, infer_us,
+             esp_timer_get_time() / 1000);
+}
+
 /* decision: baseline run on the chip. */
 static void build_decision(char *msg, size_t n, uint32_t seq, const char *ts)
 {
@@ -137,21 +157,24 @@ static void build_decision(char *msg, size_t n, uint32_t seq, const char *ts)
     int64_t infer_us = esp_timer_get_time() - t0;
 
     float forecast[BASELINE_HORIZON];
-    float pred_3h = NAN;
-    if (baseline_forecast(&s_model, VPD_PERSISTENCE, forecast) == 0) {
-        pred_3h = forecast[BASELINE_HORIZON - 1];
-    }
-    char pred[16];
-    fmt_num(pred, sizeof pred, pred_3h, 2);
-
-    snprintf(msg, n,
-             "{\"v\":1,\"node\":\"%s\",\"seq\":%" PRIu32 ",\"ts\":%s,\"model\":\"baseline\","
-             "\"now\":%s,\"warn\":%s,\"t_cross_min\":%d,\"vwc_pred_3h\":%s,"
-             "\"infer_us\":%" PRId64 ",\"t_send_ms\":%" PRId64 "}",
-             CONFIG_SAGRIOT_NODE_ID, seq, ts, d.irrigate_now ? "true" : "false",
-             d.warn ? "true" : "false", d.when_minutes, pred, infer_us,
-             esp_timer_get_time() / 1000);
+    bool have = baseline_forecast(&s_model, VPD_PERSISTENCE, forecast) == 0;
+    fmt_decision(msg, n, seq, ts, "baseline", d, have ? forecast : NULL, infer_us);
 }
+
+#if CONFIG_SAGRIOT_TINYML
+/* decision: Derya's model on the same buffer, same decision rule. No site
+ * bias here (the cloud learns and applies it); "now" is the same as the
+ * baseline's, since it only looks at the current sample. */
+static void build_decision_tinyml(char *msg, size_t n, uint32_t seq, const char *ts)
+{
+    float forecast[BASELINE_HORIZON];
+    int64_t t0 = esp_timer_get_time();
+    bool have = tinyml_forecast(&s_model, NULL, forecast) == 0;
+    baseline_decision_t d = baseline_decide_forecast(&s_model, have ? forecast : NULL);
+    int64_t infer_us = esp_timer_get_time() - t0;
+    fmt_decision(msg, n, seq, ts, "tinyml", d, have ? forecast : NULL, infer_us);
+}
+#endif
 
 /* The node does not need the cloud's answer; config messages are logged
  * until the node acts on them. */
@@ -224,6 +247,11 @@ static void run_cycle(int connect_ms)
     /* not connected: the cycle is lost and shows up as a seq gap */
     bool ok = net_publish("reading", reading, 1, false) >= 0;
     ok = (net_publish("decision", decision, 1, false) >= 0) && ok;
+#if CONFIG_SAGRIOT_TINYML
+    char decision_tm[320];
+    build_decision_tinyml(decision_tm, sizeof decision_tm, s_seq, ts);
+    ok = (net_publish("decision", decision_tm, 1, false) >= 0) && ok;
+#endif
     if (s.err != 0) {
         publish_error_status(s_seq, s.err);
     }
