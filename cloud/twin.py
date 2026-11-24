@@ -22,7 +22,10 @@ first watering the configured value is used. Turn off with auto_fc.
 
 Model choice: when more models run (models.py: Chronos, Derya's model),
 the state comes from the one with the lowest recent 3 h error
-(ModelSelector); the what-ifs always use the physical baseline.
+(ModelSelector); the what-ifs always use the physical baseline. Each
+extra model's bias on this site is learned from its scored forecasts
+and subtracted from its next ones (bias_correct; the baseline is left
+as it is, it is the reference).
 
 One direction only (digital shadow): the twin reads the node, it does not
 send anything back yet. The `config` message (twin -> node) comes later.
@@ -87,6 +90,7 @@ class TwinConfig:
     fc_flat_per_15min: float = 0.15  # "plateau": VWC changes less than this in 15 min
     fc_keep: int = 5                 # median of the last 5 plateaus
     calm_min: float = 30             # thirsty -> happy needs a watering or 30 min without a warning
+    bias_correct: bool = True        # subtract each extra model's learned bias on this site
 
 
 def _missing(v):
@@ -251,6 +255,7 @@ class Twin:
         decisions = {"baseline": self.model.decide()}
         timings = {"baseline": int((time.perf_counter() - t0) * 1e6)}
         forecasts = {"baseline": self.model.last_forecast}
+        raw = dict(forecasts)
         for m in self.extra_models:
             fc = None
             t0 = time.perf_counter()
@@ -261,11 +266,16 @@ class Twin:
                 except Exception as e:              # a broken model must not stop the twin
                     print(f"{m.name}: prediction failed ({type(e).__name__}: {e})")
             timings[m.name] = int((time.perf_counter() - t0) * 1e6)
+            raw[m.name] = fc
+            bias = (self.selector.bias(m.name)
+                    if self.config.bias_correct and getattr(m, "bias_correct", True) else None)
+            if fc is not None and bias is not None:
+                fc = np.asarray(fc, dtype=float) - bias   # this site's learned bias
             forecasts[m.name] = fc
             decisions[m.name] = decision_from_forecast(vwc, fc, self.params)
         lo, hi = self.config.score_zone
         self.selector.update(vwc, forecasts,
-                             relevant=lo <= self.params.soil_fc(vwc) <= hi)
+                             relevant=lo <= self.params.soil_fc(vwc) <= hi, raw=raw)
         self.last_decisions = decisions
         self.last_infer_us = timings
         self._last_forecasts = forecasts
