@@ -260,3 +260,64 @@ def test_service_takes_the_watered_button_and_republishes():
     assert svc.handle("sagriot/n/feedback", json.dumps({"action": "not_needed"})) == []
     out = svc.handle("sagriot/n/twin_ack", "{}")
     assert out and out[0][0] == "sagriot/n/twin"
+
+
+# -- field capacity from the data, state hysteresis ----------------------------
+def watering_curve(twin, seq0, before, peak, plateau, n_drain=8, n_flat=12):
+    """A watering: rise to peak, drain to plateau, then flat."""
+    seq = seq0
+    twin.process(reading(seq, before)); seq += 1
+    twin.process(reading(seq, peak)); seq += 1
+    for k in range(1, n_drain + 1):
+        twin.process(reading(seq, peak - (peak - plateau) * k / n_drain)); seq += 1
+    for _ in range(n_flat):
+        twin.process(reading(seq, plateau)); seq += 1
+    return seq
+
+
+def test_field_capacity_is_learned_from_the_drainage_plateau():
+    twin = Twin(Params(field_capacity=40.0))        # configured value is wrong
+    seq = watering_curve(twin, 0, 25.0, 60.0, 55.0)
+    assert twin.fc_estimates and abs(twin.fc_estimates[-1] - 55.0) < 0.2
+    assert twin.params.field_capacity == pytest.approx(55.0, abs=0.2)
+    _, s = twin.process(reading(seq, 54.9))
+    assert s["params"]["fc_source"].startswith("measured")
+
+
+def test_median_low_ignores_one_odd_plateau():
+    twin = Twin(Params(field_capacity=40.0))
+    seq = watering_curve(twin, 0, 25.0, 60.0, 55.0)
+    seq = watering_curve(twin, seq, 30.0, 75.0, 70.0)   # probe touched: odd plateau
+    assert twin.params.field_capacity == pytest.approx(55.0, abs=0.2)
+    watering_curve(twin, seq, 30.0, 61.0, 56.0)
+    assert twin.params.field_capacity == pytest.approx(56.0, abs=0.2)
+
+
+def test_auto_fc_can_be_turned_off():
+    from twin import TwinConfig
+    twin = Twin(Params(field_capacity=40.0), TwinConfig(auto_fc=False))
+    watering_curve(twin, 0, 25.0, 60.0, 55.0)
+    assert twin.params.field_capacity == 40.0 and twin.fc_estimates
+
+
+def test_thirsty_does_not_flicker_near_the_line():
+    twin = Twin(Params(field_capacity=64.9))
+    line = twin.params.vwc_line(70)
+    twin.process(reading(0, line + 1.0))
+    _, s = twin.process(reading(1, line - 0.05))
+    assert s["state"] == "thirsty"
+    for k in range(4):                               # hovering just above the line
+        _, s = twin.process(reading(2 + k, line + 0.05))
+        assert s["state"] == "thirsty"
+    for k in range(6):                               # 30 min calm
+        _, s = twin.process(reading(10 + k, line + 0.05))
+    assert s["state"] == "happy"
+
+
+@needs_record
+def test_record_field_capacity_close_to_the_hand_value():
+    from replay_check import load_log, run
+    states = run(load_log(SNAPSHOT), Params(field_capacity=45.0))   # start wrong
+    p = states[-1]["params"]
+    assert p["fc_estimates"] == pytest.approx([64.98, 71.84, 62.6, 64.24, 63.48], abs=0.05)
+    assert abs(p["field_capacity"] - 64.9) < 1.0

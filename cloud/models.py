@@ -27,6 +27,7 @@ can answer "what if I water now"; Chronos only sees the VWC series.
 """
 from collections import deque
 import importlib
+import inspect
 import math
 
 import numpy as np
@@ -54,7 +55,7 @@ class ChronosModel:
                 print(f"{self.name}: disabled ({self.error})")
         return self._pipeline
 
-    def predict(self, vwc, vpd):
+    def predict(self, vwc, vpd, fc=None):          # fc unused: VWC series only
         pipeline = self._load()
         if pipeline is None:
             return None
@@ -75,14 +76,21 @@ class FunctionModel:
     def __init__(self, name, func):
         self.name = name
         self.func = func
+        try:                                 # does the model want the field capacity?
+            self.takes_fc = "fc" in inspect.signature(func).parameters
+        except (TypeError, ValueError):
+            self.takes_fc = False
 
-    def predict(self, vwc, vpd):
-        out = np.asarray(self.func(np.asarray(vwc, dtype=float),
-                                   np.asarray(vpd, dtype=float)), dtype=float).reshape(-1)
+    def predict(self, vwc, vpd, fc=None):
+        args = (np.asarray(vwc, dtype=float), np.asarray(vpd, dtype=float))
+        out = self.func(*args, fc=fc) if self.takes_fc and fc else self.func(*args)
+        if out is None:
+            return None
+        out = np.asarray(out, dtype=float).reshape(-1)
         return out[:HORIZON] if out.size >= HORIZON else None
 
 
-def persistence(vwc, vpd):
+def persistence(vwc, vpd, fc=None):
     """Reference: VWC stays where it is. Any model should beat it."""
     return np.full(HORIZON, float(vwc[-1]))
 

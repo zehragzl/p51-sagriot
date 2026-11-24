@@ -40,7 +40,7 @@ from pathlib import Path
 
 from baseline import Params
 from models import load_model
-from twin import Twin
+from twin import Twin, TwinConfig
 
 DEFAULTS = {"field_capacity": 64.9, "step_minutes": 5.0}
 
@@ -60,6 +60,7 @@ class Service:
                    **self.node_config.get(node, {})}
             twin = Twin(Params(field_capacity=float(cfg["field_capacity"]),
                                step_minutes=float(cfg["step_minutes"])),
+                        TwinConfig(auto_fc=bool(cfg.get("auto_fc", True))),
                         extra_models=self.models)
             path = self._state_path(node)
             if path and path.exists():

@@ -12,6 +12,14 @@ it has seen happen (watering, faults). From that it gives
                water_now: "if I water now":   soil back to field capacity,
                           and how long until it crosses 70 % again
 
+Field capacity: after each watering the twin watches the drainage and
+takes the VWC where it stops falling (less than 0.15 points in 15 min,
+from 15 min after the peak, within 3 h) as a field-capacity reading; the
+(lower) median of the last five is used for the thresholds, the baseline and the
+models (internship pot: 64.9, 71.8, 62.6, 64.2, 63.5 -> 64.2 against the
+64.9 found by hand; 21 Aug was the day the probe was touched). Until the
+first watering the configured value is used. Turn off with auto_fc.
+
 Model choice: when more models run (models.py: Chronos, Derya's model),
 the state comes from the one with the lowest recent 3 h error
 (ModelSelector); the what-ifs always use the physical baseline.
@@ -41,7 +49,10 @@ timer would turn it into a false "thirsty" (seen on the replay of 9 Sept).
 from dataclasses import dataclass, field
 import math
 
+import statistics
 import time
+
+import numpy as np
 
 from baseline import Baseline, Decision, Params, decision_from_forecast
 from models import ModelSelector
@@ -70,6 +81,12 @@ class TwinConfig:
     what_if_hours: float = 120       # how far the what-ifs look (5 days: one dry-down)
     score_zone: tuple = (60.0, 85.0)  # soil_fc band where model forecasts are scored
     watering_check_min: float = 30   # a reported watering must show in VWC within this
+    auto_fc: bool = True             # learn field capacity from the drainage plateaus
+    fc_watch_min: float = 180        # look for the plateau up to 3 h after a watering
+    fc_settle_min: float = 15        # ignore the first 15 min after the peak
+    fc_flat_per_15min: float = 0.15  # "plateau": VWC changes less than this in 15 min
+    fc_keep: int = 5                 # median of the last 5 plateaus
+    calm_min: float = 30             # thirsty -> happy needs a watering or 30 min without a warning
 
 
 def _missing(v):
@@ -87,10 +104,14 @@ class Twin:
     last_irrigation_ts: str | None = None
     fault_until_step: int = -1
     fault_reason: str | None = None
+    fc_estimates: list = field(default_factory=list)  # plateau VWC after recent waterings
+    fc_track: list | None = None                  # VWC since the last watering, while watching
     watering_reported_step: int | None = None   # farmer said "Suladım", not yet seen
     watering_reported_ts: str | None = None
     watering_status: str | None = None          # pending / confirmed / unconfirmed
     last_reading: dict | None = None
+    shown_state: str | None = None   # state last published, for the hysteresis
+    calm_steps: int = 0
     extra_models: list = field(default_factory=list)   # models.ChronosModel, FunctionModel
     selector: ModelSelector = None
     last_decisions: dict = field(default_factory=dict)  # model -> Decision, for the service
@@ -148,6 +169,7 @@ class Twin:
                 if change > self.config.irrigation_rise:
                     if not after_water:                 # one event, not one per step
                         self.last_irrigation_ts = r.get("ts")
+                        self.fc_track = [self.prev_vwc]
                     self.last_irrigation_step = self.step
                     self.ack_fault()                    # watered: someone was at the pot
                     if self.watering_status in ("pending", "unconfirmed"):
@@ -164,6 +186,7 @@ class Twin:
                                          f"bir adımda (prob yerinden oynamış olabilir)")
             self.model.push(vwc, r["air_t"], r["rh"])
             self.prev_vwc = vwc
+            self._watch_field_capacity(vwc)
             self._run_models(vwc)
         else:
             t0 = time.perf_counter()
@@ -176,9 +199,9 @@ class Twin:
             self.watering_status = "unconfirmed"
         elif self.watering_status == "confirmed" and since > self._steps(60):
             self.watering_status = None                 # announced; forget it after an hour
-        return self.last_decisions["baseline"], self._compose(r, faults)
+        return self.last_decisions["baseline"], self._compose(r, faults, new_reading=True)
 
-    def _compose(self, r, faults):
+    def _compose(self, r, faults, new_reading=False):
         """State from the last decisions, the reading's faults and the held ones."""
         faults = list(faults)
         used = self.last_decisions.get(self.selector.selected) or self.last_decisions["baseline"]
@@ -196,6 +219,18 @@ class Twin:
             state = "thirsty"
         else:
             state = "happy"
+        # hysteresis: near the line the warning can come and go every cycle;
+        # leave "thirsty" only after a watering or 30 min without a warning
+        if state == "happy" and self.shown_state == "thirsty":
+            watered_now = self.last_irrigation_step == self.step
+            if new_reading:
+                self.calm_steps += 1
+            if not watered_now and self.calm_steps < self._steps(self.config.calm_min):
+                state = "thirsty"
+        elif new_reading:
+            self.calm_steps = 0                         # a warning (or a fault) restarts the wait
+        if new_reading or state != self.shown_state:
+            self.shown_state = state
         return self._state_dict(r, state, faults, used)
 
     def report_watering(self, ts=None):
@@ -221,7 +256,8 @@ class Twin:
             t0 = time.perf_counter()
             if self.model.count >= 288:             # same 24 h context as the baseline
                 try:
-                    fc = m.predict(list(self.model.vwc), list(self.model.vpd))
+                    fc = m.predict(list(self.model.vwc), list(self.model.vpd),
+                                   fc=self.params.field_capacity)
                 except Exception as e:              # a broken model must not stop the twin
                     print(f"{m.name}: prediction failed ({type(e).__name__}: {e})")
             timings[m.name] = int((time.perf_counter() - t0) * 1e6)
@@ -233,6 +269,28 @@ class Twin:
         self.last_decisions = decisions
         self.last_infer_us = timings
         self._last_forecasts = forecasts
+
+    def _watch_field_capacity(self, vwc):
+        """After a watering, the VWC where drainage stops is the field capacity."""
+        if self.fc_track is None:
+            return
+        self.fc_track.append(vwc)
+        track = self.fc_track
+        settle = self._steps(self.config.fc_settle_min)
+        win = self._steps(15)
+        peak = max(range(len(track)), key=track.__getitem__)
+        for k in range(peak + settle, len(track) - win):
+            if abs(track[k] - track[k + win]) <= self.config.fc_flat_per_15min:
+                self._add_fc_estimate(track[k])
+                self.fc_track = None
+                return
+        if len(track) > self._steps(self.config.fc_watch_min):
+            self.fc_track = None                    # never settled (watered again, too little water)
+
+    def _add_fc_estimate(self, value):
+        self.fc_estimates = (self.fc_estimates + [round(float(value), 2)])[-self.config.fc_keep:]
+        if self.config.auto_fc:
+            self.params.field_capacity = round(float(statistics.median_low(self.fc_estimates)), 1)
 
     def ack_fault(self):
         """Clears a held fault (pot watered, or the probe was checked)."""
@@ -316,7 +374,10 @@ class Twin:
             "params": {"field_capacity": self.params.field_capacity,
                        "step_minutes": self.params.step_minutes,
                        "warn_vwc": round(self.params.vwc_line(self.params.fc_warn_low), 2),
-                       "crit_vwc": round(self.params.vwc_line(self.params.fc_crit_low), 2)},
+                       "crit_vwc": round(self.params.vwc_line(self.params.fc_crit_low), 2),
+                       "fc_source": (f"measured ({len(self.fc_estimates)} waterings)"
+                                     if self.config.auto_fc and self.fc_estimates else "configured"),
+                       "fc_estimates": self.fc_estimates},
             "forecast": self._forecast_curve(),
             "drying_per_day": self._drying_per_day(),
         }
@@ -335,13 +396,18 @@ class Twin:
                 "watering_reported_ts": self.watering_reported_ts,
                 "watering_status": self.watering_status,
                 "last_reading": self.last_reading,
+                "fc_estimates": self.fc_estimates, "fc_track": self.fc_track,
+                "shown_state": self.shown_state, "calm_steps": self.calm_steps,
                 "selector": self.selector.to_dict()}
 
     def load_dict(self, data):
         self.model.load_dict(data.get("model", {}))
         self.selector.load_dict(data.get("selector", {}))
+        if self.config.auto_fc and data.get("fc_estimates"):
+            self.params.field_capacity = round(float(statistics.median_low(data["fc_estimates"])), 1)
         for key in ("step", "prev_vwc", "last_irrigation_step", "last_irrigation_ts",
                     "fault_until_step", "fault_reason", "watering_reported_step",
-                    "watering_reported_ts", "watering_status", "last_reading"):
+                    "watering_reported_ts", "watering_status", "last_reading",
+                    "fc_estimates", "fc_track", "shown_state", "calm_steps"):
             if key in data:
                 setattr(self, key, data[key])
