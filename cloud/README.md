@@ -104,3 +104,13 @@ not fit next to the rest on a 1 GB VM; use a 2 GB machine.
 
 A model for `--model name=module:function` is any
 `predict(vwc_24h, vpd_24h) -> 36 VWC values` (288 inputs each, 5-min steps).
+
+## Digital twin web panel (`gateway/twin_panel.py`)
+
+A local page on the gateway (Mac now, Pi later): state, soil moisture against
+the 70 % / 60 % lines, history, what-ifs and the model table; a 🔧 button
+sends `twin_ack`. No external scripts, works offline.
+
+```bash
+python gateway/twin_panel.py          # then open http://localhost:8080
+```
