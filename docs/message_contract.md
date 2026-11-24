@@ -41,9 +41,9 @@ connects later sees the latest state at once.
             "water_now":{"vwc_after":64.9, "warn_in_min":5190}},
  "selected_model":"baseline",
  "models":{"baseline":{"now":true, "warn":true, "t_cross_min":5, "vwc_pred_3h":42.0,
-                       "mae_3h":0.08, "scored":288},
+                       "mae_3h":0.08, "scored":288, "bias_3h":0.01},
            "chronos":{"now":true, "warn":true, "t_cross_min":10, "vwc_pred_3h":42.6,
-                      "mae_3h":0.11, "scored":288}},
+                      "mae_3h":0.11, "scored":288, "bias_3h":0.15}},
  "last_irrigation_ts":"2026-11-01T09:20:00Z",
  "model":{"fitted":true, "samples":288, "needed":288, "a":-0.012, "c":-0.004},
  "params":{"field_capacity":64.9, "step_minutes":5}}
@@ -71,6 +71,12 @@ connects later sees the latest state at once.
   decision and its recent 3 h error; `selected_model` is the one the state
   comes from (`cloud/models.py`, ModelSelector). `decision` is that model's.
   The what-ifs always come from the baseline.
+- `bias_3h`: the model's mean raw error 3 h ahead on this site (forecast
+  minus what happened, VWC points; `null` before 12 scored forecasts).
+  For extra models (not the baseline, not persistence) the learned bias
+  is subtracted from every horizon step before the decision, so
+  `vwc_pred_3h` and `mae_3h` are the corrected values. Off with
+  TwinConfig `bias_correct=False`.
 - `cloud_decision` is sent once per model per reading; `model` tells them
   apart (`gateway/compare.py --model chronos`).
 - A sudden-drop fault stays until the pot is watered or a `twin_ack`

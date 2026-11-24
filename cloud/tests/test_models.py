@@ -120,3 +120,39 @@ def test_on_the_record_the_twin_listens_to_the_baseline_not_persistence():
     last = states[-1]["models"]
     assert last["baseline"]["mae_3h"] < last["persistence"]["mae_3h"]
     assert all(s["selected_model"] == "baseline" for s in states)
+
+
+def test_selector_learns_a_constant_bias():
+    s = ModelSelector(["baseline", "wet"], min_scores=12)
+    series = drying(200)
+    feed(s, series, {"baseline": oracle(series), "wet": oracle(series, 0.7)})
+    assert s.bias("wet") == pytest.approx(np.full(HORIZON, 0.7))
+    assert s.summary()["wet"]["bias_3h"] == pytest.approx(0.7)
+    t = ModelSelector(["baseline", "wet"])
+    t.load_dict(json.loads(json.dumps(s.to_dict())))
+    assert t.bias("wet") == pytest.approx(s.bias("wet"))
+
+
+def test_twin_corrects_a_biased_model_but_not_the_reference():
+    def wet(vwc, vpd, fc=None):          # always 0.7 VWC too wet, otherwise exact slope
+        return np.asarray(vwc[-1] - 0.02 * np.arange(1, HORIZON + 1)) + 0.7
+    twin = Twin(Params(field_capacity=64.9),
+                extra_models=[FunctionModel("wet", wet), load_model("persistence")])
+    for i in range(500):
+        _, state = twin.process(reading(i, 52.0 - 0.02 * i))
+    m = state["models"]
+    assert m["wet"]["bias_3h"] == pytest.approx(0.7, abs=0.05)
+    assert twin.selector.scores["wet"][-1] < 0.05       # corrected forecasts are scored
+    raw_last = wet(list(twin.model.vwc), None)[-1]
+    assert m["wet"]["vwc_pred_3h"] == pytest.approx(raw_last - 0.7, abs=0.05)
+    assert m["persistence"]["vwc_pred_3h"] == pytest.approx(state["vwc"])   # untouched
+
+
+@pytest.mark.skipif(not SNAPSHOT.exists(), reason="sagriot-dss not found")
+def test_record_bias_correction_helps_deryas_model():
+    from replay_check import load_log, run
+    states = run(load_log(SNAPSHOT), Params(field_capacity=64.9),
+                 models=[load_model("tinyml=derya_model:predict")])
+    m = states[-1]["models"]
+    assert m["tinyml"]["mae_3h"] < 0.2                   # 0.357 without the correction
+    assert sum(s["state"] == "thirsty" for s in states) == 1237   # decisions unchanged
