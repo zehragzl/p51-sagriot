@@ -13,7 +13,7 @@ Every payload carries a version field `v`. Change the version when a field chang
 | `sagriot/<node>/decision` | node → gateway | every cycle (stays on the gateway) | 1 |
 | `sagriot/<node>/status` | node → gateway → cloud | on boot and on errors (retained) | 1 |
 | `sagriot/<node>/cloud_decision` | cloud → gateway | after the cloud models run on a reading | 1 |
-| `sagriot/<node>/config` | gateway → node | when the interval changes (retained) | 1 |
+| `sagriot/<node>/config` | cloud (twin) → gateway → node | when the send interval changes (retained) | 1 |
 
 ### Flow
 
@@ -41,6 +41,20 @@ One message per model (`baseline`, `tinyml`).
  "model":"baseline", "now":false, "warn":true, "t_cross_min":48, "vwc_pred_3h":24.9,
  "infer_us":90, "t_send_ms":1730}
 ```
+
+## Config payload
+
+Published by the digital twin, retained, read by the node when it wakes
+(docs/digital_twin_plan.md, section 4b).
+
+```json
+{"v":1, "send_every":3}
+```
+
+- `send_every`: send once every N measurement cycles (the node still measures
+  and decides every cycle and keeps the samples in RTC memory). Default 1 if no
+  config has been received. The node sends at once whenever its own decision
+  has `warn` or `now`, whatever `send_every` says.
 
 ## Field notes
 

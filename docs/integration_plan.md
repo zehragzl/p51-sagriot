@@ -71,6 +71,9 @@ Okunamayan değer `NAN` olur; düğüm onu `null` olarak gönderir.
 - 24 saatlik tampon (`baseline_t`, 2,3 KB) uyku boyunca RTC belleğinde
   (`RTC_DATA_ATTR`) kalmalı.
 - Uykudan önce prob gücü (MOSFET) kapalı, GPIO durumu sabitlenmiş olmalı.
+- `seq` ve henüz gönderilmemiş ölçümler de RTC belleğinde tutulmalı: düğüm
+  her 5 dk ölçer, ama Wi-Fi'ı dijital ikizin `send_every` ayarına göre açar
+  (`docs/digital_twin_plan.md` 4b, `docs/message_contract.md` Config payload).
 
 ### Rüya'dan beklenenler
 
@@ -133,7 +136,8 @@ baseline, Chronos ve TinyML doğrudan karşılaştırılır.
 - Modeller: `baseline` (staj Python referansı), `chronos` (Chronos-tiny),
   `tinyml_float` (Derya'dan gelince).
 - **Dijital ikiz:** fizik modeli her okumayla güncellenir; "sulamasaydık ne
-  olurdu" senaryoları ve tahmin–ölçüm farkıyla anomali tespiti.
+  olurdu" senaryoları ve tahmin–ölçüm farkıyla anomali tespiti. Ayrıntılar:
+  `docs/digital_twin_plan.md`.
 
 ## 6. Takvim (öneri, 2 Aralık ara değerlendirmesine kadar)
 
