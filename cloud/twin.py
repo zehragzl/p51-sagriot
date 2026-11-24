@@ -173,7 +173,7 @@ class Twin:
             else self._minutes_until_below(dry, p.fc_warn_low),
             "crit_in_min": 0 if self.model.vwc[-1] < p.vwc_line(p.fc_crit_low)
             else self._minutes_until_below(dry, p.fc_crit_low),
-            "vwc_end": round(float(dry[-1]), 1),
+            "vwc_end": round(max(float(dry[-1]), 0.0), 1),
         }
         wet = self.model.forecast(steps, start_vwc=p.field_capacity)
         water_now = {
