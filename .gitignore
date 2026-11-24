@@ -24,3 +24,9 @@ cloud/.env
 cloud/mosquitto/passwd
 gateway/bridge.conf
 firmware/sdkconfig.local.bak
+# Cloud service and bot state (local runs), secrets
+data/cloud_state/
+data/bot_state.json
+data/feedback.jsonl
+.env
+cloud/.env

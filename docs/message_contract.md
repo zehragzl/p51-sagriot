@@ -52,6 +52,21 @@ connects later sees the latest state at once.
 - A sudden-drop fault stays until the pot is watered or a `twin_ack`
   arrives (any payload).
 
+### Feedback (`cloud/telegram_bot.py`)
+
+`sagriot/<node>/feedback` (bot → cloud, QoS 1) carries every Telegram button
+press, with the state the farmer saw; the bot also appends it to
+`feedback.jsonl`. This is the user-feedback data for closing the loop.
+
+```json
+{"time":"2026-11-24T10:44:53+00:00", "node":"node01", "action":"watered",
+ "state":"thirsty", "seq":1042, "vwc":44.1, "soil_fc":67.9,
+ "decision":{"now":true, "warn":true, "t_cross_min":5, "vwc_pred_3h":42.0}}
+```
+
+`action`: `watered` (✅ Suladım), `not_needed` (❌ Gerek yok), `snooze`
+(⏰ remind in 1 h), `checked` (🔧 probe checked; the bot also sends `twin_ack`).
+
 ## Reading payload
 
 ```json

@@ -15,6 +15,7 @@ VM is: install Docker, copy the folder, create the two secret files,
 | `baseline.py` | driven-drying model, same decision as the node (float64) |
 | `twin.py` | digital twin: state (😊 / 😟 / ⚠️), fault checks, what-ifs |
 | `replay_check.py` | runs the twin offline over a recorded log (no broker) |
+| `telegram_bot.py` | Telegram alerts with buttons; saves the farmer's feedback |
 | `nodes.json.example` | per-node field capacity and cycle length |
 | `tests/` | `python -m pytest tests -q` (from this folder) |
 | `fake_cloud.py` | old stand-in service (model "echo"), kept for loop tests |
@@ -66,4 +67,18 @@ cd cloud
 python replay_check.py ../../sagriot-dss/data/snapshot_0909.csv              # 5 watering cycles
 python replay_check.py ../../sagriot-dss/data/snapshot_0909.csv --inject-drop # 9 Sept probe shift
 SAGRIOT_DSS=../../sagriot-dss python -m pytest tests -q
+```
+
+## Telegram bot (`telegram_bot.py`)
+
+Sends a message when the twin's state changes (😊 → 😟, → ⚠️, 😟 → 😊),
+with buttons ✅ Suladım / ⏰ 1 saat ertele / ❌ Gerek yok (🔧 Kontrol ettim
+for faults). Button presses go to `data/feedback.jsonl` and
+`sagriot/<node>/feedback`. `/durum` shows the current state and what-ifs.
+
+```bash
+# Telegram: @BotFather -> /newbot -> copy the token
+export TELEGRAM_TOKEN=...            # or put it in cloud/.env (git-ignored)
+python cloud/telegram_bot.py         # next to service.py, same broker
+# then send /start to the bot from your phone
 ```
