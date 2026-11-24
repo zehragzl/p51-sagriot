@@ -58,6 +58,11 @@ connects later sees the latest state at once.
   before 24 h). `what_if.*.curve`: the next 24 h every `curve_step_min`
   minutes, for the panel. `drying_per_day`: VWC points lost per day at
   the current VPD. `params.warn_vwc` / `crit_vwc`: the 70 % / 60 % FC lines.
+- `params.field_capacity` is learned from the data: the VWC where drainage
+  stops after each watering (`params.fc_estimates`, last five; the lower
+  median is used). `params.fc_source` says `configured` (no watering seen
+  yet) or `measured (n waterings)`. Off with `"auto_fc": false` in nodes.json.
+- `state` leaves `thirsty` only after a watering or 30 min without a warning.
 - `watering`: `status` is `pending` after a Telegram "Suladım" (feedback
   `watered`), `confirmed` when the VWC rise is seen, `unconfirmed` (a fault)
   if no rise within 30 min; `null` otherwise. The cloud also listens to
